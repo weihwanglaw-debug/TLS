@@ -1,0 +1,10 @@
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import '@fontsource/roboto/400.css';
+import '@fontsource/roboto/500.css';
+import '@fontsource/roboto/700.css';
+import './trs-theme.css';
+import './styles.css';
+import SetupApp from './SetupApp';
+import UmpireApp from './UmpireApp';
+createRoot(document.getElementById('root')!).render(/^\/umpire(?:\/|$)/i.test(location.pathname)?<UmpireApp/>:<SetupApp/>);

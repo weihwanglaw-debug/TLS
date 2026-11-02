@@ -1,0 +1,26 @@
+.page-header { display:flex; justify-content:space-between; align-items:center; gap:16px; margin-bottom:32px; }
+.action { display:inline-flex; align-items:center; justify-content:center; gap:8px; font-size:13px; font-weight:600; padding:9px 14px; white-space:nowrap; min-height:38px; }
+button:disabled { opacity:.4; cursor:not-allowed; }
+button:focus-visible,a:focus-visible { outline:2px solid var(--color-primary); outline-offset:3px; }
+.panel { border:1px solid var(--color-table-border); min-width:0; }
+.muted { opacity:.6; }
+.event-banner { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:20px; margin-bottom:24px; border:1px solid var(--color-table-border); background:var(--color-row-hover); }
+.event-banner h2 { font-size:20px; margin-top:5px; }
+.eyebrow { font-size:10px; letter-spacing:.1em; font-weight:700; opacity:.6; text-transform:uppercase; }
+.notice { display:flex; align-items:center; gap:10px; border:1px solid var(--color-table-border); border-left:3px solid var(--color-primary); padding:14px 16px; margin-bottom:24px; background:var(--color-row-hover); font-size:13px; }
+.notice>svg { color:var(--color-primary); flex-shrink:0; }
+.notice.error { border-color:var(--color-primary); }
+.section-toolbar { display:flex; flex-wrap:wrap; gap:16px; align-items:center; justify-content:space-between; margin-bottom:20px; }
+.section-toolbar>h2 { margin-bottom:0; padding-bottom:0; border-bottom:0!important; }
+.section-toolbar>div { min-width:0; }
+.section-toolbar .btn-outline[aria-pressed="true"] { background-color:var(--color-primary); border-color:var(--color-primary); color:hsl(var(--primary-foreground)); }
+.section-toolbar select.field-input { width:auto; max-width:100%; }
+label:has(>button[role="switch"]) { align-items:center; }
+.admin-page-title { min-width:0; }
+.admin-page-title h1 { overflow-wrap:anywhere; }
+
+.date-picker-dialog table { margin:0; border:0; width:100%; background:transparent; }
+.date-picker-dialog th, .date-picker-dialog td { padding:0; border:0; background:transparent; }
+.date-picker-dialog thead, .date-picker-dialog tbody tr, .date-picker-dialog tbody tr:hover { background:transparent; color:inherit; }
+.date-picker-dialog select { background:var(--color-page-bg); color:var(--color-body-text); accent-color:var(--color-primary); }
+.date-picker-dialog button[aria-selected="true"] { background:var(--color-primary); color:hsl(var(--primary-foreground)); }

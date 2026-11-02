@@ -1,0 +1,3 @@
+export default function UmpireChoices({label,value,options,onChange,disabled=false}:{label:string;value:string;options:{value:string;label:string}[];onChange:(value:string)=>void;disabled?:boolean}){
+ return <fieldset className="umpire-choice-group" disabled={disabled}><legend>{label}</legend>{options.length===1?<p className="umpire-single-choice">{options[0].label}<span>Automatically selected</span></p>:<div className="umpire-choices">{options.map(option=><button type="button" key={option.value} disabled={disabled} aria-pressed={value===option.value} onClick={()=>onChange(option.value)}><span>{option.label}</span>{value===option.value&&<strong aria-hidden="true">✓</strong>}</button>)}</div>}</fieldset>;
+}

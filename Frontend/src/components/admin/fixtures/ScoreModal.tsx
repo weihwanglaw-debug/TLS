@@ -1,0 +1,290 @@
+import ActionMessage from '../../../ActionMessage';
+/**
+ * ScoreModal.tsx - Versus result entry
+ *
+ * Two big panels (Team 1 vs Team 2). Admin clicks one to mark as winner.
+ * Complete game scores follow the saved TLS match rules.
+ * Remark field added.
+ * Walkover toggle -> winner selection.
+ */
+
+import React from "react";
+import { Plus, Trash2, AlertTriangle } from "lucide-react";
+import type { MatchEntry } from "@/types/config";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
+import { getEntryDisplay } from "@/lib/entryDisplay";
+
+
+
+interface Props {
+  children?: React.ReactNode;
+  busy?: boolean;
+  error?: string;
+  open:          boolean;
+  draft:         MatchEntry | null;
+  isLocked:      boolean;
+  onClose:       () => void;
+  onSave:        (draft: MatchEntry) => void;
+  onClear?:      () => void;
+  onChangeDraft: (patch: Partial<MatchEntry>) => void;
+}
+
+//  Team panel - clickable to select as winner
+
+function TeamPanel({
+  team, side, winner, walkover, walkoverWinner, onClick,
+}: {
+  team: MatchEntry["team1"];
+  side: "team1" | "team2";
+  winner: MatchEntry["winner"];
+  walkover: boolean;
+  walkoverWinner: string;
+  onClick: () => void;
+}) {
+  const isWinner = walkover ? walkoverWinner === side : winner === side;
+  const display = getEntryDisplay({
+    teamMode: team.teamMode,
+    label: team.label,
+    participants: team.participants,
+    participantClubs: team.participantClubs,
+  }, "compact");
+
+  return (
+    <button
+      onClick={onClick}
+      className="text-left w-full h-full flex flex-col p-5 transition-all"
+      style={{
+        border: `2px solid ${isWinner ? "var(--color-primary)" : "var(--color-table-border)"}`,
+        backgroundColor: isWinner ? "var(--color-row-hover)" : "transparent",
+        outline: "none",
+      }}>
+  {/* Seed badge */}
+      <div className="flex items-start justify-between gap-2 mb-3">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {team.seed != null && (
+            <span className="text-xs font-bold px-1.5 py-0.5"
+              style={{ backgroundColor: "var(--color-primary)", color: "var(--color-hero-text)" }}>
+              #{team.seed}
+            </span>
+          )}
+          {isWinner && (
+            <span className="text-xs font-bold px-2 py-0.5"
+              style={{ backgroundColor: "var(--badge-open-text)", color: "white" }}>
+              ✓ WINNER
+            </span>
+          )}
+        </div>
+      </div>
+
+  {/* Team display */}
+      <p className="font-bold text-base mb-1 leading-tight" style={{ color: isWinner ? "var(--color-primary)" : undefined }}>
+        {display.main}
+      </p>
+      <div className="flex-1">
+        {display.sub && <p className="text-xs opacity-60 leading-relaxed">{display.sub}</p>}
+      </div>
+
+  {/* Click hint when no winner selected */}
+      {!isWinner && !walkover && winner === null && (
+        <p className="text-xs opacity-30 mt-3">Click to select as winner</p>
+      )}
+    </button>
+  );
+}
+
+//  Main modal
+
+export function ScoreModal({ open, draft, isLocked, onClose, onSave, onClear, onChangeDraft, children, busy=false, error }: Props) {
+
+  if (!draft) return null;
+
+  const set = (patch: Partial<MatchEntry>) => onChangeDraft(patch);
+  const saveWithCurrentTime = () => onSave(draft);
+
+  const updateGame = (idx: number, side: "p1" | "p2", val: string) =>
+    set({ games: draft.games.map((g, i) => i === idx ? { ...g, [side]: val } : g) });
+  const addGame    = () => set({ games: [...draft.games, { p1: "", p2: "" }] });
+  const removeGame = (idx: number) => {
+    if (draft.games.length <= 1) return;
+    set({ games: draft.games.filter((_, i) => i !== idx) });
+  };
+
+  const scoreRows = draft.games.map(g => ({ p1: Number(g.p1), p2: Number(g.p2), raw: g }));
+  const hasValidGameScores = draft.games.length > 0 && scoreRows.every(g =>
+    g.raw.p1 !== "" &&
+    g.raw.p2 !== "" &&
+    Number.isFinite(g.p1) &&
+    Number.isFinite(g.p2) &&
+    g.p1 >= 0 &&
+    g.p2 >= 0
+  );
+  const completedScores = hasValidGameScores ? scoreRows.map(g => ({ p1: g.p1, p2: g.p2 })) : [];
+  const team1Games = completedScores.filter(g => g.p1 > g.p2).length;
+  const team2Games = completedScores.filter(g => g.p2 > g.p1).length;
+  const tiedGames = completedScores.filter(g => g.p1 === g.p2).length;
+
+  const winnerMatchesScores =
+    draft.winner === "team1" ? team1Games > team2Games :
+    draft.winner === "team2" ? team2Games > team1Games :
+    false;
+  const hasWinnerScore = hasValidGameScores && tiedGames === 0 && winnerMatchesScores;
+
+  const teamDisplayLabel = (team: MatchEntry["team1"]) =>
+    getEntryDisplay({
+      teamMode: team.teamMode,
+      label: team.label,
+      participants: team.participants,
+      participantClubs: team.participantClubs,
+    }, "compact").main;
+  const sectionLabelClass = "text-xs font-bold uppercase tracking-wide";
+
+  const secondaryTextStyle = { color: "var(--color-disabled-text)" };
+  const labelTextStyle = { color: "var(--color-body-text)" };
+
+  const selectWinner = (side: "team1" | "team2") => {
+    if (draft.walkover) return;
+  // Toggle off if already selected
+    set({ winner: draft.winner === side ? null : side });
+  };
+
+  const canSave = draft.walkover ? !!draft.walkoverWinner : hasWinnerScore;
+  const hasSavedResult = draft.status === "C" ||
+    draft.status === "WO" ||
+    draft.winner !== null ||
+    draft.walkover ||
+    draft.walkoverWinner !== "" ||
+    draft.games.some(g => g.p1 !== "" || g.p2 !== "");
+
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
+      <DialogContent
+        className="max-w-2xl max-h-[94vh] overflow-y-auto p-0"
+        style={{ backgroundColor: "var(--color-page-bg)", border: "1px solid var(--color-table-border)" }}>
+
+        <DialogHeader className="px-7 pt-7 pb-0">
+          <DialogTitle className="font-bold text-lg">
+            {isLocked ? "Edit Score" : "Enter Score"}
+          </DialogTitle>
+          {(draft.courtNo || draft.matchDate) && (
+            <p className="text-xs opacity-50 mt-1">
+              {draft.courtNo && `${draft.courtNo}  `}
+              {draft.matchDate && `${new Date(draft.matchDate).toLocaleDateString("en-SG", { weekday:"short", day:"2-digit", month:"short" })}  `}
+              {draft.startTime && `${draft.startTime}${draft.endTime ? `-${draft.endTime}` : ""}`}
+            </p>
+          )}
+        </DialogHeader>
+
+        <div className="px-7 py-5 space-y-5"><ActionMessage message={error||''}/><fieldset disabled={busy} className="space-y-5">
+
+  {/*  Team panels  */}
+          <div>
+            <p className={`${sectionLabelClass} mb-3`} style={labelTextStyle}>
+              {draft.walkover ? "Walkover - Select Winner" : "Select Winner - click a team"}
+            </p>
+            <div className="grid grid-cols-[1fr_48px_1fr] gap-0">
+              <TeamPanel team={draft.team1} side="team1"
+                winner={draft.winner} walkover={draft.walkover} walkoverWinner={draft.walkoverWinner}
+                onClick={() => draft.walkover
+                  ? set({ walkoverWinner: "team1" })
+                  : selectWinner("team1")} />
+              <div className="flex items-center justify-center">
+                <span className="font-black text-lg opacity-20">vs</span>
+              </div>
+              <TeamPanel team={draft.team2} side="team2"
+                winner={draft.winner} walkover={draft.walkover} walkoverWinner={draft.walkoverWinner}
+                onClick={() => draft.walkover
+                  ? set({ walkoverWinner: "team2" })
+                  : selectWinner("team2")} />
+            </div>
+
+          </div>
+
+  {/*  Walkover toggle  */}
+          <div className="flex items-center justify-between gap-3 px-4 py-3"
+            style={{ border: "1px solid var(--color-table-border)" }}>
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <AlertTriangle className="h-4 w-4 opacity-50 flex-shrink-0" />
+              Walkover - one side did not show
+            </label>
+            <Switch
+              aria-label="Walkover - one side did not show"
+              checked={draft.walkover}
+              onCheckedChange={v => set({ walkover: v, walkoverWinner: "", winner: null })} />
+          </div>
+
+  {/*  Game scores  */}
+          {!draft.walkover && (
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <p className={sectionLabelClass} style={labelTextStyle}>
+                  Game Scores <span className="font-normal normal-case" style={secondaryTextStyle}>(required)</span>
+                </p>
+                <button onClick={addGame} className="flex items-center gap-1 text-xs font-medium"
+                  style={{ color: "var(--color-primary)" }}>
+                  <Plus className="h-3 w-3" /> Add Game
+                </button>
+              </div>
+
+              <div className="grid grid-cols-[64px_1fr_28px_1fr_32px] gap-2 mb-1.5 px-0.5">
+                <span></span>
+                <span className="text-xs font-semibold truncate" style={labelTextStyle}>{teamDisplayLabel(draft.team1)}</span>
+                <span></span>
+                <span className="text-xs font-semibold truncate" style={labelTextStyle}>{teamDisplayLabel(draft.team2)}</span>
+                <span></span>
+              </div>
+              {draft.games.map((g, idx) => (
+                <div key={idx} className="grid grid-cols-[64px_1fr_28px_1fr_32px] gap-2 mb-2 items-center">
+                  <span className="text-xs font-semibold" style={labelTextStyle}>Game {idx + 1}</span>
+                  <input type="number" min="0" className="field-input text-center font-bold"
+                    value={g.p1} placeholder="0"
+                    onChange={e => updateGame(idx, "p1", e.target.value)} />
+                  <span className="text-center opacity-20 font-bold text-lg">-</span>
+                  <input type="number" min="0" className="field-input text-center font-bold"
+                    value={g.p2} placeholder="0"
+                    onChange={e => updateGame(idx, "p2", e.target.value)} />
+                  <button onClick={() => removeGame(idx)} disabled={draft.games.length <= 1}
+                    className="p-1 opacity-30 hover:opacity-70 disabled:opacity-10">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+              {!hasValidGameScores && (
+                <p className="text-xs mt-2" style={{ color: "var(--badge-soon-text)" }}>
+                  Enter numeric, non-negative scores for every game before saving.
+                </p>
+              )}
+              {hasValidGameScores && draft.winner !== null && !hasWinnerScore && (
+                <p className="text-xs mt-2" style={{ color: "var(--badge-soon-text)" }}>
+                  Selected winner must match the game scores, and winner-based results cannot include tied games.
+                </p>
+              )}
+            </div>
+          )}
+
+          {children}
+          <div><p className={sectionLabelClass}>Assigned officials</p>{draft.officials.map(o=><p className="text-sm mt-2" key={o.id}>{o.role}: {o.name}</p>)}</div>
+        </fieldset></div>
+
+        <DialogFooter className="px-7 pb-7 pt-0 flex items-center justify-between">
+          <div>
+            {onClear && hasSavedResult && (
+              <button onClick={onClear}
+                className="btn-outline px-5 py-2.5 text-sm">
+                Clear Result
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <button disabled={busy} onClick={onClose} className="btn-outline px-5 py-2.5 text-sm">Cancel</button>
+            <button onClick={saveWithCurrentTime} disabled={busy||!canSave}
+              className="btn-primary px-6 py-2.5 text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
+              Save Result
+            </button>
+          </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
