@@ -90,6 +90,7 @@ public sealed class LiveRuntime(SetupStore store,IDbContextFactory<TLSDbContext>
             else m.ReviewAvailable=request.ReviewAvailable??(m.Court==request.Court&&m.ReviewAvailable);
             TournamentRules.Need(!m.Rules.ChallengesEnabled||m.ReviewAvailable,"Confirm review availability for this match assignment, or choose a preset without challenges.");
             SessionCourts.Authorize(s,plan,m,request.Court,request.CourtOverrideReason);
+            if(m.Status==MatchStatus.Scheduled)TournamentRules.Need(SessionCourts.EligibleCourts(s,plan,m,LocalNow(s)).Contains(request.Court),SessionCourts.UnavailableMessage);
             var serviceJudge=request.ServiceJudgeId is null?m.ServiceJudgeId:string.IsNullOrWhiteSpace(request.ServiceJudgeId)?null:request.ServiceJudgeId;
             var lineJudges=request.LineJudgeIds??m.LineJudgeIds;
             if(MatchStatus.Occupied(m.Status))TournamentRules.Need(request.UmpireId==m.UmpireId&&serviceJudge==m.ServiceJudgeId&&lineJudges.Order().SequenceEqual(m.LineJudgeIds.Order()),"Officials are locked after the match starts. Tablet replacement keeps the assigned officials.");
@@ -214,9 +215,8 @@ public sealed class LiveRuntime(SetupStore store,IDbContextFactory<TLSDbContext>
             TournamentRules.Need(confirmEarlyStart,"This match is starting earlier than scheduled. Confirm the early start to continue.");
         }
         TournamentRules.Need(active||early,"The match must start within an active playing session.");
-        var earlyCourt=early&&!active&&sessions.Any(w=>w.Date.ToDateTime(w.Start)<=m.Start&&m.Start<w.Date.ToDateTime(w.End)&&SessionCourts.Allows(w,m.Court??0));
         TournamentRules.Need(m.Court.HasValue&&!s.Venue.ClosedCourts.Contains(m.Court.Value),"This court is closed.");
-        TournamentRules.Need(SessionCourts.Available(s,plan,m.Court!.Value,now)||earlyCourt||SessionCourts.ExceptionApplies(m,now),"This court is unavailable in the current session. Ask the organiser to select an available court or record a court exception when assigning the match.");
+        TournamentRules.Need(SessionCourts.EligibleCourts(s,plan,m,now).Contains(m.Court!.Value),SessionCourts.UnavailableMessage);
         var officials=TournamentRules.OfficialIds(m).ToHashSet();
         foreach(var other in TournamentScheduler.Matches(s).Where(o=>o.Id!=m.Id&&o.Status!="BY"))
         {

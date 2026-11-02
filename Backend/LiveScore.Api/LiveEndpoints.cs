@@ -3,6 +3,21 @@ public static class LiveEndpoints
 {
     public static void MapLive(this WebApplication app)
     {
+        app.MapGet("/api/display",(SetupStore store,HttpContext context)=>
+        {
+            if(!LiveAccess.VenuePeer(context.Connection.RemoteIpAddress))return Results.Json(new{message="Live display is available only on the venue network."},statusCode:403);
+            var s=store.Read();var config=s.Venue.Display;
+            var matches=TournamentScheduler.Matches(s).Where(m=>m.Court.HasValue&&MatchStatus.Occupied(m.Status)&&
+                (config.Courts.Length==0||config.Courts.Contains(m.Court.Value))&&
+                (config.EventId==""||s.Programs.Any(p=>p.Id==m.ProgramId&&p.EventId==config.EventId)))
+                .OrderBy(m=>m.Court).ThenBy(m=>m.Number).Select(m=>{
+                    var p=s.Programs.Single(p=>p.Id==m.ProgramId);var row=LiveRuntime.Row(s,m);
+                    return new{id=m.Id,number=m.Number,court=m.Court,programName=p.Name,eventName=s.Events.Single(e=>e.Id==p.EventId).Name,
+                        row.RoundLabel,nameA=row.NameA,nameB=row.NameB,status=m.Status,scoreA=row.ScoreA,scoreB=row.ScoreB,
+                        games=m.Games,serverSide=m.Live?.Serving?.ServerSide,matchWon=row.MatchWon};
+                }).ToArray();
+            return Results.Ok(new{config,serverTime=DateTimeOffset.UtcNow,matches});
+        });
         var admin=app.MapGroup("/api/dashboard");
         admin.AddEndpointFilter(async(c,next)=>{if(!LiveAccess.LocalAdmin(c.HttpContext))return Results.Json(new{message="Use the organiser console on the local server."},statusCode:403);return await next(c);});
         admin.MapGet("/",(string? eventId,SetupStore store,LiveRuntime live,HttpContext context)=>LiveDashboard.View(store.Read(),live,context,eventId));

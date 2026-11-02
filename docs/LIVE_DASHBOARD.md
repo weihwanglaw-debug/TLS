@@ -285,7 +285,7 @@ Browser verification: the QR panel was visually checked; opening its venue-netwo
 
 ## Session court availability — 30 October 2026
 
-Live starts and dashboard estimates now respect each dated session's selected courts, using the same court-membership check as scheduling. A called match may be prepared ahead of time, but its tablet cannot start on a court outside the active session allocation. In Assign & Generate Code, Court exception accepts a short reason and applies only to that match/court until the current session ends. It cannot bypass closed courts, occupied courts, umpire conflicts, event dates or absence of an active playing session. The assignment history records the exception. Replayed dependants awaiting an earlier corrected result cannot be called or started.
+Dashboard calling, court choices and tablet starts share the session-court eligibility check. During an active session, queued matches use its allocated open courts. Before a session or during a break, an upcoming match can be prepared on courts allocated to its planned start; future-day preparation uses that day's planned session. START still requires the scheduled day for early play, confirmation and event/session safeguards. Late matches with no active session cannot be newly assigned. Playing/submitted matches retain tablet replacement on their existing court after the session ends. The queue API adds eligibleCourts; occupancy and official reservations are checked separately. Administrators adjust session times/courts in Schedule. Existing explicit court-exception API requests remain supported, but the dashboard has no exception control. Replayed dependants awaiting an earlier corrected result cannot be called or started.
 
 ## Scoreboard and early starts — 30 October 2026
 
@@ -332,3 +332,16 @@ PairCourtRequest adds optional serviceJudgeId and lineJudgeIds. Omitted/null opt
 Files: Frontend/src/OfficialsEditor.tsx (new), LiveDashboard.tsx, TournamentConsole.tsx, live-types.ts; Backend/LiveScore.Api/LiveModels.cs and LiveRuntime.cs. Tests: officials-editor.test.tsx, live-dashboard-calling.test.tsx, workflow.test.tsx and tests/official_roles_integration.py.
 
 Verification: backend build passed with zero warnings/errors. All 162 frontend tests across 27 files passed, including the real React/SQL workflow. The disposable officials API suite passed 98 checks, and the existing live lifecycle suite passed 236 HTTP assertions covering pairing, restart/replacement, heartbeat, scoring, paper reconciliation and reservation protection. No existing tournament records were modified by tests.
+
+
+## Venue live display — 2 November 2026
+
+Master Setting → Live Display controls all venue display screens. Choose 1–6 columns and 1–6 rows independently (default 3 columns × 2 rows), automatic page rotation, 3–120 seconds per page (default 10), an event or all events, and optional court filters. No selected courts means all courts. A layout preview shows the density before saving; high-density layouts need a sufficiently large screen. Settings are saved together using the existing revision-protected settings API and venue settings JSON; no SQL schema upgrade is needed.
+
+Open `/display` on a browser connected to the venue network. Use Full screen or the browser's normal casting/mirroring feature. This is a read-only screen without organiser controls. Playing and submitted matches appear in court order; called matches awaiting start are omitted. Cards show event, program, round, court, player-aligned completed-game scores, current points and a serving indicator. Submitted matches remain visible as Awaiting result confirmation until the organiser confirms and releases the court. The page does not hold completed results after court release.
+
+Scores and saved configuration refresh every two seconds. Pages rotate only when needed and enabled; Previous/Next also work manually. A connection failure retains the last received scores, prominently marks them as outdated and pauses rotation until reconnection. This is browser display/casting support, not a native Chromecast receiver integration. Verify readability and connectivity on the actual venue screens.
+
+`GET /api/display` is restricted to the venue network and loopback, following tablet network eligibility. It exposes an explicit spectator projection with match names, event/program/round, court, scores, serving side and match state. No tablet credentials, device identity/IP, official contact data or organiser commands are exposed. Existing organiser access restrictions remain unchanged. `PUT /api/setup/settings` accepts optional `liveDisplay`; all values are validated on the server. Older clients may omit it.
+
+Display settings are stored as `display` in `SystemSettings.LiveVenueJson`. Before rolling back to a binary predating this feature, back up that JSON and remove only the new `display` property, retaining presets, court closures and bindings; older binaries reject unknown JSON fields. Removing frontend display/graph components does not alter scores or rally history.

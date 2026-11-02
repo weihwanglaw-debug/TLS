@@ -6,5 +6,6 @@ import '@fontsource/roboto/700.css';
 import './trs-theme.css';
 import './styles.css';
 import SetupApp from './SetupApp';
+import LiveDisplay from './LiveDisplay';
 import UmpireApp from './UmpireApp';
-createRoot(document.getElementById('root')!).render(/^\/umpire(?:\/|$)/i.test(location.pathname)?<UmpireApp/>:<SetupApp/>);
+createRoot(document.getElementById('root')!).render(/^\/umpire(?:\/|$)/i.test(location.pathname)?<UmpireApp/>:location.pathname.replace(/\/+$/,'')==='/display'?<LiveDisplay/>:<SetupApp/>);

@@ -60,7 +60,10 @@ public static class LiveDashboard
             if(!m.Start.HasValue||!m.Court.HasValue){waiting="Scheduling required";fit=null;}
             if(m.PendingA||m.PendingB){waiting="Awaiting corrected earlier result";fit=null;}
             if(fit.HasValue)Occupy(m,fit.Value.AddMinutes(m.DurationMinutes));
-            queue.Add(new(LiveRuntime.Row(s,m),fit,planned.HasValue&&planned<now,planned.HasValue?Math.Max(0,(int)(now-planned.Value).TotalMinutes):0,waiting));
+            var plan=TournamentRules.Event(s,s.Programs.Single(p=>p.Id==m.ProgramId).EventId);
+            var eligibleCourts=SessionCourts.EligibleCourts(s,plan,m,TimeZoneInfo.ConvertTime(now,SetupStore.Zone(s.TimeZone)).DateTime);
+            if(eligibleCourts.Length==0&&m.Start.HasValue&&!m.PendingA&&!m.PendingB)waiting="Review session times and courts in Schedule";
+            queue.Add(new(LiveRuntime.Row(s,m),fit,planned.HasValue&&planned<now,planned.HasValue?Math.Max(0,(int)(now-planned.Value).TotalMinutes):0,waiting,eligibleCourts));
         }
         bool Included(TournamentMatch m)=>string.IsNullOrEmpty(eventId)||s.Programs.Single(p=>p.Id==m.ProgramId).EventId==eventId;
         var eventCourts=string.IsNullOrEmpty(eventId)?Enumerable.Range(1,s.CourtCount).ToArray():EventOperations.Courts(s,TournamentRules.Event(s,eventId));
@@ -85,7 +88,7 @@ public static class LiveDashboard
         return new{selectedEventId=string.IsNullOrEmpty(eventId)?null:eventId,eventContext=EventContext(s,eventId,now),revision=s.Revision,serverTime=now,serverLocalTime=LiveRuntime.LocalNow(s),timeZone=s.TimeZone,displayTimeZone=TimeZoneInfo.TryConvertWindowsIdToIanaId(s.TimeZone,out var iana)?iana:s.TimeZone,heartbeatSeconds=runtime.HeartbeatSeconds,disconnectSeconds=runtime.DisconnectSeconds,courtCount=s.CourtCount,events=s.Events.Select(e=>new{e.Id,e.Name,e.StartDate,e.EndDate,courts=EventOperations.Courts(s,TournamentRules.Event(s,e.Id))}),courts,queue=queue.Where(q=>Included(matches.Single(m=>m.Id==q.Match.Id))).OrderBy(q=>q.Match.PlannedStart??DateTime.MaxValue).ThenBy(q=>q.Match.Number),programs=programRows,presets=s.Venue.Presets.Where(p=>p.Status=="A"),officials=s.EventPlans.SelectMany(p=>p.Officials.Select(o=>new{p.EventId,o.Id,o.Name,reservations=LiveRuntime.OfficialReservations(s,o.Id).Select(m=>new{matchId=m.Id,court=m.Court}).ToArray()})),tabletUrls=urls.Distinct().ToArray()};
     }
 }
-public sealed record QueueItem(LiveMatchView Match,DateTimeOffset? EstimatedStart,bool Delayed,int DelayMinutes,string WaitingFor);
+public sealed record QueueItem(LiveMatchView Match,DateTimeOffset? EstimatedStart,bool Delayed,int DelayMinutes,string WaitingFor,int[] EligibleCourts);
 
 public static class DashboardCalendar
 {

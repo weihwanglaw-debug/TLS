@@ -108,12 +108,17 @@ try:
     call('tablet/command',{'version':m['version'],'operationId':str(uuid.uuid4()),'action':'START','serving':{'serverSide':'A','serverId':a,'receiverId':b,'leftSide':'A'}},token=grant['token'])
     check(next(c for c in dash(other)['courts'] if c['number']==1)['outsideEvent'])
     check(next(c for c in dash(other)['courts'] if c['number']==1)['match'] is None)
-    # A match already playing can finish after the event/session window. No new match can start.
-    rollover(eid,today-timedelta(days=2),today-timedelta(days=1))
-    check(dash(eid)['eventContext']['calendar']=='C' and dash(eid)['eventContext']['unfinished']>0)
+    # Prepare a second tablet before simulating the event/session expiry.
     waiting=next(q['match'] for q in dash(eid)['queue'])
     expiredCode=mutate('dashboard/pair',{'matchId':waiting['id'],'court':2,'umpireId':plan['officials'][1]['id'],'presetId':preset,'reason':''},'POST')
     expiredGrant=call('tablet/pair',{'code':expiredCode['code'],'deviceId':'expired-window-test-device','deviceName':'Expired window test'})
+    # A match already playing can finish after the event/session window. No new call/start is allowed.
+    rollover(eid,today-timedelta(days=2),today-timedelta(days=1))
+    check(dash(eid)['eventContext']['calendar']=='C' and dash(eid)['eventContext']['unfinished']>0)
+    check(all(not q['eligibleCourts'] for q in dash(eid)['queue']))
+    mutate('dashboard/pair',{'matchId':waiting['id'],'court':2,'umpireId':plan['officials'][1]['id'],'presetId':preset,'reason':''},'POST',400)
+    replacement=mutate('dashboard/pair',{'matchId':m['id'],'court':1,'umpireId':plan['officials'][0]['id'],'presetId':preset,'reason':'Replace tablet after session expiry'},'POST')
+    check(replacement['match']['status']=='IP')
     expiredMatch=expiredGrant['match']['match'];server=next(p['id'] for p in expiredMatch['players'] if p['side']=='A');receiver=next(p['id'] for p in expiredMatch['players'] if p['side']=='B')
     blocked=call('tablet/command',{'version':expiredMatch['version'],'operationId':str(uuid.uuid4()),'action':'START','serving':{'serverSide':'A','serverId':server,'receiverId':receiver,'leftSide':'A'}},status=400,token=expiredGrant['token'])
     check('event dates' in blocked['message'])

@@ -10,7 +10,7 @@ const match=(id:string,court:number)=>({id,number:Number(id.slice(1)),eventId:'e
 beforeEach(()=>{
  localStorage.clear();localStorage.setItem('tls-dashboard-event','e');
  const a=match('m1',1),b=match('m2',2),c=match('m3',3);
- const queue=[a,b,c].map(m=>({match:m,estimatedStart:'2026-10-26T07:00:00Z',delayed:false,delayMinutes:0,waitingFor:'Ready to call'}));
+ const queue=[a,b,c].map(m=>({match:m,estimatedStart:'2026-10-26T07:00:00Z',delayed:false,delayMinutes:0,waitingFor:'Ready to call',eligibleCourts:[1,2,3,4]}));
  data={revision:4,selectedEventId:'e',serverTime:'2026-10-26T06:00:00Z',serverLocalTime:'2026-10-26T14:00:00',timeZone:'Asia/Singapore',events:[{id:'e',name:'Test Event',startDate:'2026-10-26',endDate:'2026-10-28',courts:[1,2,3,4]}],eventContext:{calendar:'O',sessionState:'B',day:1,nextSession:'2026-10-26T15:00:00'},queue,courts:[1,2,3,4].map(number=>({number,status:number===3?'W':number===4?'X':'A',outsideEvent:false,match:number===3?c:null,lastMatch:null,next:queue.find(q=>q.match.court===number)||null,device:{state:'N',name:'',ipAddress:'',lastSeen:null,codeExpired:false}})),programs:[],presets:[],officials:[{eventId:'e',id:'official',name:'Umpire One'}],tabletUrls:['http://localhost/umpire']} as DashboardData;
  service.liveApi.mockReset();service.liveApi.mockImplementation(async(path:string,body?:{matchId:string;court:number})=>body?{code:'TESTCODE',expiresAt:'2026-10-26T07:10:00Z',match:{...data.queue.find(q=>q.match.id===body.matchId)!.match,court:body.court}}:structuredClone(data));
 });
@@ -111,4 +111,19 @@ test('saved optional officials load into assignment and challenge switch is rele
  data.officials.push({eventId:'e',id:'service',name:'Service Official'},{eventId:'e',id:'line',name:'Line Official'});
  show();fireEvent.click(await screen.findByRole('button',{name:'Call Next Match on Court 1'}));const dialog=screen.getByRole('dialog',{name:'Assign Court / Tablet'});
  expect((within(dialog).getByLabelText('Official 2') as HTMLSelectElement).value).toBe('service');expect((within(dialog).getByLabelText('Official 3') as HTMLSelectElement).value).toBe('line');expect(within(dialog).getByRole('switch',{name:'Challenge review available on this court'})).toBeTruthy();
+});
+
+test('session allocation filters calling and queue court choices',async()=>{
+ data.queue[0].eligibleCourts=[2];
+ show();await screen.findAllByRole('button',{name:'Assign to Court'});
+ expect(screen.queryByRole('button',{name:'Call Next Match on Court 1'})).toBeNull();
+ fireEvent.click(screen.getAllByRole('button',{name:'Assign to Court'})[0]);
+ const select=within(screen.getByRole('dialog',{name:'Assign Court / Tablet'})).getByLabelText('Assign court');
+ expect(within(select).getAllByRole('option').map(o=>(o as HTMLOptionElement).value)).toEqual(['0','2']);
+});
+test('no eligible session courts prevents assignment even when courts are free',async()=>{
+ data.queue.forEach(q=>q.eligibleCourts=[]);
+ show();const buttons=await screen.findAllByRole('button',{name:'Assign to Court'});
+ expect(buttons.every(b=>(b as HTMLButtonElement).disabled)).toBe(true);
+ expect(screen.queryByRole('button',{name:/Call Next Match/})).toBeNull();
 });

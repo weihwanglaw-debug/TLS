@@ -168,3 +168,10 @@ One-minute steps carry across hours and AM/PM and wrap within 00:00–23:59. Dat
 Files: Frontend/src/TimePicker.tsx, Frontend/src/time-picker.css (new), Frontend/tests/time-picker.test.tsx, date-picker.test.tsx and event-schedule-allocation.test.tsx. No API or database changes.
 
 Verification: frontend build and all 169 tests across 27 files passed, including the disposable SQL-backed React workflow. Focused tests cover one-minute stepping across noon/midnight, cancellation, independent start/end inputs, date preservation, required/disabled fields and parent-form isolation. Frontend assets published to backend wwwroot. Live HTTP verification could not run because the local TLS server was not listening on port 5180; the server was not started or stopped in this task. The existing frontend chunk-size advisory remains.
+
+Court assignment and START use the same session-court eligibility check. If a session allocation changes after pairing, START revalidates it and directs the organiser to Schedule when unavailable. This does not change early-start confirmation, event dates, overtime restrictions or replacement access for a match already playing/submitted.
+
+
+## Shared scoresheet progression graph — 2 November 2026
+
+The shared scoresheet renders a score progression chart below the scoring grids in the umpire view, console view and result-confirmation views, including printed scoresheets. It uses recorded rallies rather than reconstructing points from final scores. Each game has its own chart with player-name colours, point axis and recorded-rally count. Manual/resumed score jumps break the plotted lines, and incomplete histories carry an explanatory note. With no rallies recorded, the chart area states that no recorded rallies are available. Player-side identities remain fixed regardless of physical court-end changes. No new rally data is stored.

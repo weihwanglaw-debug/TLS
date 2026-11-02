@@ -87,3 +87,17 @@ startMatch.Start=current.AddMinutes(-30);startMatch.End=current.AddMinutes(10);S
 startPlan.Sessions=[new(today,TimeOnly.FromDateTime(current.AddHours(-1)),TimeOnly.FromDateTime(current.AddHours(2)),[1])];StartCheck(false,true,"normal start needs no early confirmation");
 startData.Events=[new("E","Event","Hall",today.AddDays(1),today.AddDays(2))];StartCheck(true,false,"event date restriction remains");
 Console.WriteLine($"PASS: {checks} total focused rules and early-start checks");
+
+var courtData=new SetupData{CourtCount=3};
+var courtPlan=new EventPlan{Sessions=[morning,afternoon,new(new DateOnly(2030,1,2),new TimeOnly(9,0),new TimeOnly(13,0),[3])]};
+var queued=new TournamentMatch{Court=2,Start=new DateTime(2030,1,1,14,0,0)};
+Check(SessionCourts.EligibleCourts(courtData,courtPlan,queued,new(2030,1,1,8,0,0)).SequenceEqual(new[]{1,2}),"prepare upcoming session courts");
+Check(SessionCourts.EligibleCourts(courtData,courtPlan,queued,new(2030,1,1,10,0,0)).SequenceEqual(new[]{1}),"active session takes precedence over planned courts");
+Check(SessionCourts.EligibleCourts(courtData,courtPlan,queued,new(2030,1,1,13,0,0)).SequenceEqual(new[]{1,2}),"session end is exclusive and upcoming preparation remains allowed");
+Check(SessionCourts.EligibleCourts(courtData,courtPlan,queued,new(2030,1,1,18,0,0)).Length==0,"expired session cannot receive new calls");
+courtData.Venue.ClosedCourts=[2];Check(SessionCourts.EligibleCourts(courtData,courtPlan,queued,new(2030,1,1,14,0,0)).SequenceEqual(new[]{1}),"closed courts excluded from shared eligibility");
+queued.CourtExceptionCourt=3;queued.CourtExceptionUntil=new(2030,1,1,13,0,0);queued.CourtExceptionReason="Existing authorised exception";
+Check(SessionCourts.EligibleCourts(courtData,courtPlan,queued,new(2030,1,1,10,0,0)).SequenceEqual(new[]{1,3}),"legacy explicit exception retains its target court");
+queued.Start=new(2030,1,2,10,0,0);Check(SessionCourts.EligibleCourts(courtData,courtPlan,queued,new(2030,1,1,14,0,0)).SequenceEqual(new[]{3}),"future-day preparation uses planned session allocation");
+queued.Start=null;Check(SessionCourts.EligibleCourts(courtData,courtPlan,queued,new(2030,1,1,10,0,0)).Length==0,"unscheduled match requires scheduling");
+Console.WriteLine($"PASS: {checks} total focused rules checks");

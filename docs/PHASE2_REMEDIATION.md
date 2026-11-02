@@ -8,7 +8,7 @@ Normal operation remains Call → Pair → Score → Submit → Admin Confirm. N
 | Immediate same-group knockout rematches | Preserve qualifier origins and separate opening opponents where possible; show A1/A2 labels in preview | QualificationPlacement.cs, TournamentRules.cs, fixture-adapter.ts | 2/3/4/5/8-group separation and qualifier uniqueness |
 | Retirement/DQ/manual decisions lacked a clean result | Actual partial scores, official winner, result code and reason | OfficialResults.cs, TournamentModels.cs, TournamentEndpoints.cs, ExceptionalResultEditor.tsx, MatchResultEditor.tsx, ResultsTab.tsx | Partial retirement, DQ, normal validation, manual winner, UI confirmation |
 | Winner corrections could corrupt later matches | Impact review; safe update; explicit retain/replay choice for progressed dependants; before/after history; stale review protection | ResultDependencies.cs, LiveRuntime.cs, TournamentEndpoints.cs, ExceptionalResultEditor.tsx | Safe final update, started-final rejection, retain/replay, tablet revocation, stale revision |
-| Live court checks ignored session selection | Shared session court check; match-specific reasoned exception until active session end | SessionCourts.cs, LiveRuntime.cs, LiveDashboard.cs, LiveModels.cs, LiveDashboard.tsx | Court unavailable rejection, explicit exception, expiry/moved-court checks |
+| Live court checks ignored session selection | Shared call/start court eligibility and dashboard filtering; adjust allocation through Schedule | SessionCourts.cs, LiveRuntime.cs, LiveDashboard.cs, LiveModels.cs, LiveDashboard.tsx | Shared assignment/start eligibility, advance preparation, rejection without mutation, expiry and tablet replacement checks |
 | Save Session did not save planning work | Persistent event draft; isolated validation simulation; publish only on Confirm Schedule | ScheduleEndpoints.cs, TournamentModels.cs, EventSchedule.tsx, tournament-types.ts | Save/reload/server restart, unchanged slots, stale save, draft cleared on confirmation |
 | Storage failure could lock umpire input | Memory-first pending command, guarded storage, send-lock cleanup and same-ID retry | UmpireApp.tsx | Denied reads, quota failure, failed network action and successful retry |
 | Five obsolete integration fixtures | Use returned official IDs and current preset/reset prerequisites | umpire_serving, round_preset, dashboard_event, event_workflow, seeding integration tests | Full integration regression |
@@ -28,7 +28,7 @@ Unplayed affected matches update and waiting tablets disconnect. Started/submitt
 2. Pair 2–3 phones/tablets by QR and manual code. Score simultaneously; check undo, submit and admin confirmation.
 3. Disconnect Wi-Fi, retry a pending point, and replace a tablet. Check that no point is duplicated or lost.
 4. Enter a partial retirement; correct an earlier winner; review both an unstarted and a started dependent match.
-5. Try a court outside the active session, then record a court exception and check the tablet can start.
+5. Try a court outside the active session: dashboard choices and API assignment must reject it. Adjust session courts in Schedule, then call and start. Check upcoming-session preparation and started-match tablet replacement still work.
 6. Preview group qualifiers and resolve an unresolved tie before advancing.
 
 ## Operational limits

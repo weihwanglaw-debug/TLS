@@ -69,6 +69,15 @@ public static class SetupEndpoints
         group.MapPut("/settings",(SetupSettings request,SetupStore store)=>store.Change(request.Revision,"SETTINGS",s=>{SetupStore.Zone(request.TimeZone);if(s.TimeZone!=request.TimeZone)TournamentRules.Need(!s.ProgramPlans.Any(p=>p.Matches.Count>0),"Timezone cannot change after fixtures are generated.");
 
             s.TimeZone=request.TimeZone;
+            if(request.LiveDisplay is not null)
+            {
+                var d=request.LiveDisplay;
+                TournamentRules.Need(d.Columns is >=1 and <=6&&d.Rows is >=1 and <=6,"Display rows and columns must be 1–6.");
+                TournamentRules.Need(d.PageSeconds is >=3 and <=120,"Display page duration must be 3–120 seconds.");
+                TournamentRules.Need(d.EventId is not null&&(d.EventId==""||s.Events.Any(e=>e.Id==d.EventId)),"Choose an imported display event.");
+                TournamentRules.Need(d.Courts is not null&&d.Courts.Distinct().Count()==d.Courts.Length&&d.Courts.All(c=>c>=1&&c<=s.CourtCount),"Choose valid, distinct display courts.");
+                s.Venue.Display=d;
+            }
 
             if(request.CourtCount is not null){TournamentRules.Need(request.CourtCount>=1&&request.CourtCount<=50,"Court count must be 1â€“50.");TournamentRules.Need(!TournamentScheduler.Matches(s).Any(m=>m.Court>request.CourtCount)&&!s.EventPlans.Any(p=>p.ScheduleDays.Any(d=>d.Courts.Any(c=>c>request.CourtCount))),"A court is still assigned to a fixture; its venue number cannot be removed.");TournamentRules.Need(!s.Venue.ClosedCourts.Any(c=>c>request.CourtCount)&&!s.Venue.Bindings.Any(b=>b.Court>request.CourtCount),"Reopen or release the affected courts before reducing the court count.");s.CourtCount=request.CourtCount.Value;}
 

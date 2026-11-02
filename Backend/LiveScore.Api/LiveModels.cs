@@ -8,6 +8,7 @@ public static class MatchStatus
 }
 public sealed class LiveVenue
 {
+    public LiveDisplaySettings Display {get;set;}=new();
     public List<GamePreset> Presets {get;set;}=[];
     public List<int> ClosedCourts {get;set;}=[];
     public List<TabletBinding> Bindings {get;set;}=[];
@@ -85,3 +86,13 @@ public static class MatchResults
 }
 
 public sealed record SavedLiveMatch(LiveMatchState State,List<GameScore> Games,string? WinnerId,DateTime? ActualFinishedAt);
+
+public sealed class LiveDisplaySettings
+{
+    public int Columns {get;set;}=3;
+    public int Rows {get;set;}=2;
+    public int PageSeconds {get;set;}=10;
+    public bool AutoRotate {get;set;}=true;
+    public string EventId {get;set;}="";
+    public int[] Courts {get;set;}=[];
+}

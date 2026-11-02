@@ -7,6 +7,7 @@ public sealed class SetupData
     [System.Text.Json.Serialization.JsonIgnore]
     public Dictionary<string,ImportedIdentity> ImportIdentities {get;set;}=[];
     public LiveVenue Venue {get;set;}=new();
+    public LiveDisplaySettings LiveDisplay {get=>Venue.Display;set=>Venue.Display=value;}
     public int CourtCount { get; set; } = 4;
     public List<EventPlan> EventPlans { get; set; } = [];
     public List<ProgramPlan> ProgramPlans { get; set; } = [];
@@ -47,7 +48,7 @@ public sealed class SetupPackage
     public List<SetupEntry> Entries { get; set; } = [];
 }
 public sealed record ImportInfo(string EventId,string Source,string SourceSystemId,string SourceEventId,string SourceTimeZone,DateTimeOffset ExportedAt,DateTimeOffset ImportedAt,string Stage);
-public sealed record SetupSettings(long Revision,string TimeZone,string? AppName=null,string? LogoLightUrl=null,string? LogoDarkUrl=null,int? CourtCount=null);
+public sealed record SetupSettings(long Revision,string TimeZone,string? AppName=null,string? LogoLightUrl=null,string? LogoDarkUrl=null,int? CourtCount=null,LiveDisplaySettings? LiveDisplay=null);
 public sealed record SetupConfirm(long Revision,string Token);
 public sealed class RuleException(string message,int status=400):Exception(message) { public int Status { get; } = status; }
 public static class JsonDefaults { public static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web) { UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow }; }
