@@ -9,7 +9,9 @@ export function trsEligibility(p:SourcePackage,catalog:Catalog,replaceId=''):str
   if(imported&&replaceId&&imported.stage!=='P')return 'Existing fixtures protect this event from replacement.';
   if(!p.registrationClosed)return 'Registration is still open in TRS.';
   if(p.hasFixtures)return 'Clear fixtures and any results in TRS before transferring.';
-  const parts=new Intl.DateTimeFormat('en-CA',{timeZone:p.sourceTimeZone,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());
+  const offset=/^([+-])(\d{2}):(\d{2})$/.exec(p.sourceTimeZone);
+  const now=offset?new Date(Date.now()+(Number(offset[2])*60+Number(offset[3]))*60000*(offset[1]==='-'?-1:1)):new Date();
+  const parts=new Intl.DateTimeFormat('en-CA',{timeZone:offset?'UTC':p.sourceTimeZone,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(now);
   const date=(kind:string)=>parts.find(x=>x.type===kind)!.value;
   if(event.endDate<`${date('year')}-${date('month')}-${date('day')}`)return 'Past event.';
   if(['C','X'].includes(event.status))return 'Event is closed or archived.';

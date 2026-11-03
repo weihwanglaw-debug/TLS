@@ -19,6 +19,9 @@ function deviceId(){try{const saved=localStorage.getItem('tls-umpire-device');if
 
 export default function UmpireApp(){
  const [cache,setCache]=useState<Cache|undefined>(load),[code,setCode]=useState(''),[label,setLabel]=useState('Umpire Tablet'),[busy,setBusy]=useState(false),[online,setOnline]=useState(false),[closed,setClosed]=useState(false),[error,setError]=useState(''),[now,setNow]=useState(Date.now());
+ const [pointLocked,setPointLocked]=useState(false);
+ const pointUntil=useRef(0),pointTimer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);
+ useEffect(()=>()=>clearTimeout(pointTimer.current),[]);
  const [storageWarning,setStorageWarning]=useState(false),[sessionId,setSessionId]=useState(sessionFromUrl),[joining,setJoining]=useState(()=>!sessionFromUrl()||sessionFromUrl()!==cache?.view.sessionId);
  const [fullScreen,setFullScreen]=useState(!!document.fullscreenElement),[fullScreenBusy,setFullScreenBusy]=useState(false);
  const [panel,setPanel]=useState<Panel>(null),[setup,setSetup]=useState<ServingSetup>({serverSide:'A',serverId:'',receiverId:'',leftSide:'A'}),[reason,setReason]=useState('');
@@ -81,6 +84,11 @@ export default function UmpireApp(){
  async function send(action?:string,side?:string,extra:Partial<Command>={}):Promise<boolean>{
   const current=latest.current;if(!current||sending.current)return false;
   if(current.pending&&action){setError('Retry the pending action before entering another action.');return false;}
+  if(action==='POINT'){
+   if(performance.now()<pointUntil.current)return false;
+   pointUntil.current=performance.now()+500;setPointLocked(true);clearTimeout(pointTimer.current);
+   pointTimer.current=setTimeout(()=>setPointLocked(false),500);
+  }
   sending.current=true;setBusy(true);setError('');
   try{const pending=current.pending||{version:current.view.match.version,operationId:operationId(),action:action!,...extra,...(side?{side}:{})};remember({...current,pending});
   const fresh=await liveApi<TabletView>('tablet/command',pending,current.token,8000);remember({token:current.token,view:{...fresh,sessionId:fresh.sessionId||current.view.sessionId}});setOnline(!fresh.match.paperMode);connectionError.current=false;return true;}
@@ -92,7 +100,7 @@ export default function UmpireApp(){
  const name=(id:string)=>match?.players.find(p=>p.id===id)?.name||'Not set';
  const game=match?Math.min(match.rules.gamesToWin*2-1,Math.max(1,match.games.length+(match.awaitingNextGame?0:1))):1;
  const left:Side=match?.serving?.leftSide||'A',right=other(left),disabled=busy||!online||closed||!!cache?.pending||!!match?.paperMode;
- const canRecord=!disabled&&match?.status==='IP',canPoint=canRecord&&!!match?.serving&&!match.awaitingNextGame&&!match.matchWon;
+ const canRecord=!disabled&&match?.status==='IP',canPoint=canRecord&&!pointLocked&&!!match?.serving&&!match.awaitingNextGame&&!match.matchWon;
  const remaining=(side:Side)=>match?Math.max(0,match.rules.challengesPerGame-(match.resultDetails?.challenges.filter(c=>c.game===game&&c.side===side&&c.outcome==='U').length||0)):0;
  function openSetup(){if(!match)return;const next=match.awaitingNextGame&&!match.matchWon;const last=match.games[match.games.length-1];const side:Side=next?(last.a>last.b?'A':'B'):match.serving?.serverSide||'A';setSetup({serverSide:side,serverId:next?players(side)[0]?.id||'':match.serverId||players(side)[0]?.id||'',receiverId:next?players(other(side))[0]?.id||'':match.receiverId||players(other(side))[0]?.id||'',leftSide:next?other(left):left});setReason('');setPanel('setup');}
  function card(id?:string){setCardPlayer(id||match?.players[0]?.id||'');setCardType('Y');setReason('');setPanel('card');}
@@ -116,7 +124,7 @@ export default function UmpireApp(){
  <div className="umpire-court">{court(left)}{court(right)}{match.serving&&!match.awaitingNextGame&&!match.matchWon&&<svg className="serve-arrow" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label={'Serve from '+name(match.serverId)+' to '+name(match.receiverId)}><defs><marker id="serve-tip" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"/></marker></defs><path d={`M ${serverOnLeft?40:60},${serverRow?72:28} L ${serverOnLeft?60:40},${serverRow?28:72}`} markerEnd="url(#serve-tip)"/></svg>}</div>
  <div className="umpire-counters">{(match.rules.challengesEnabled&&match.reviewAvailable?[left,'shuttle',right]:['shuttle']).map(side=>side==='shuttle'?<div key={side} className="counter shuttles"><span>Shuttles used</span><div><strong>{match.resultDetails?.shuttlesUsed??'—'}</strong><button disabled={!canRecord||!match.rules.countShuttles} onClick={()=>void send('SHUTTLE')}>+ Shuttle</button></div></div>:<button key={side} className={'counter team-'+side} disabled={!canRecord||!match.rules.challengesEnabled||!match.reviewAvailable} onClick={()=>{setChallengeSide(side as Side);setOutcome('U');setPanel('challenge');}}><span>Challenges left</span><strong>{match.rules.challengesEnabled&&match.reviewAvailable?remaining(side as Side):'—'}</strong></button>)}</div>
  <div className="umpire-point-row">{finished?<div className="umpire-result-state" role="status"><div><strong>{submitted?'Result submitted — awaiting organiser confirmation':'Match finished — review and submit'}</strong><span>Winner: {winner} · {match.games.map(g=>g.a+'–'+g.b).join(', ')}</span></div>{submitted?<button className="btn-primary" disabled={busy||!!cache?.pending} onClick={reset}>Back to access code</button>:<button className="btn-primary" disabled={disabled} onClick={()=>setPanel('submit')}>Review &amp; submit result</button>}</div>:match.status==='SC'||!match.serving||match.awaitingNextGame&&!match.matchWon?<button className="match-step-button" disabled={disabled} onClick={openSetup}>{match.status==='SC'?'Set up & start match':match.awaitingNextGame?'Set up next game':'Confirm serving positions'}</button>:[left,right].map(side=><button key={side} className={'point-button team-'+side} disabled={!canPoint} aria-label={'Add point to side '+side} onClick={()=>void send('POINT',side)}>+ Point</button>)}</div>
- <nav className="umpire-actions" aria-label="Match controls"><button disabled={!canRecord||!match.canUndo} onClick={()=>void send('UNDO')}><RotateCcw/>Undo last point</button><button disabled={busy} onClick={()=>setPanel('actions')}><List/>Match actions</button><button onClick={()=>setPanel('sheet')}><FileText/>Scoresheet</button><button className="paper-button" disabled={busy||match.paperMode} onClick={()=>{setReason('Continue on paper after a technical problem');setPanel('paper');}}><FileText/>Continue on paper</button></nav>
+ <nav className="umpire-actions" aria-label="Match controls"><button className="umpire-undo" disabled={!canRecord||!match.canUndo} onClick={()=>void send('UNDO')}><RotateCcw/>Undo last point</button><button disabled={busy} onClick={()=>setPanel('actions')}><List/>Match actions</button><button onClick={()=>setPanel('sheet')}><FileText/>Scoresheet</button><button className="paper-button" disabled={busy||match.paperMode} onClick={()=>{setReason('Continue on paper after a technical problem');setPanel('paper');}}><FileText/>Continue on paper</button></nav>
 
  </>}
  {match&&panel&&<Dialog open onOpenChange={open=>{if(!open&&!busy)setPanel(null);}}><DialogContent showClose={false} className="umpire-dialog" style={{backgroundColor:'var(--color-page-bg)'}}>

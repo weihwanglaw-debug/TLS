@@ -1,0 +1,9 @@
+# Qualifier knockout placement and preview
+
+Group results must be confirmed and qualifying ties resolved before generating the opening knockout round. Existing rank priority and sporting seed priority remain. Equal/unseeded qualifiers within the same rank follow their saved group order (A, B, C...), never entry IDs. The two-group/two-qualifier crossover remains A1–B2 and A2–B1. Origin identities remain attached to the entry. Same-group opening-match avoidance continues to apply. Group order is a transparent deterministic tiebreak, not a random lottery or a claim that a particular BYE assignment is inherently fair.
+
+The opening knockout preview names its BYE recipients and their group origins. Administrators select two actual qualifiers in the existing preview table to swap slots before confirmation, including swapping a BYE recipient with an entry in a played pairing. A BYE is a slot, not a selectable participant. Same-group collisions cannot be introduced by a swap. The automatic BYE winner is updated when its recipient changes.
+
+Only one program may be edited at a time. Existing group matches, results, live metadata, schedules, seeds and qualification origins remain unchanged. Swaps are preview-only until Confirm; the global revision protects against stale previews. A confirmed, scheduled or played qualifier round cannot use this preview token, and later knockout rounds cannot use this editing path. Existing Reset Latest Round protections still apply when regenerating an unplayed confirmed round. Ordinary initial-draw swapping continues to work.
+
+No database schema or request-contract changes are required. Rollback restores the prior ordering and preview restrictions; already confirmed draws keep their stored placements. Validation: `tests/RulesChecks`, `tests/qualifier_preview_integration.py`, `Frontend/tests/qualifier-preview.test.tsx`, and the existing draw/workflow regression suites.

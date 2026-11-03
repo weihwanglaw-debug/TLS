@@ -156,7 +156,7 @@ public static class TournamentRules
             }
             else
             {
-                var ordered=Enumerable.Range(0,plan.AdvancePerGroup).SelectMany(rank=>qualifiers.Select(g=>g[rank]).OrderBy(id=>plan.Seeds.GetValueOrDefault(id)??int.MaxValue).ThenBy(id=>id,StringComparer.Ordinal)).ToList();
+                var ordered=Enumerable.Range(0,plan.AdvancePerGroup).SelectMany(rank=>qualifiers.Select((g,origin)=>new{Id=g[rank],Origin=origin}).OrderBy(q=>plan.Seeds.GetValueOrDefault(q.Id)??int.MaxValue).ThenBy(q=>q.Origin).Select(q=>q.Id)).ToList();
                 created=Knockout(plan.ProgramId,ordered.Select((id,i)=>(id,i+1)).ToList(),1,scoring);
             }
             plan.QualificationOrigins=qualifiers.SelectMany((entries,index)=>entries.Select((id,rank)=>new{Id=id,Origin=((char)('A'+index)).ToString()+(rank+1)})).ToDictionary(x=>x.Id,x=>x.Origin);

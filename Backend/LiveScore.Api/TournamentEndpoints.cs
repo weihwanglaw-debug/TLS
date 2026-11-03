@@ -30,6 +30,7 @@ public static class TournamentEndpoints
         group.MapPut("/event",(PlanRequest request,SetupStore store)=>View(store.Change(request.Revision,"EVENT_PLAN",s=>
         {
             request.Plan.PlanningDraft=TournamentRules.Event(s,request.Plan.EventId).PlanningDraft;
+            request.Plan.Publication=TournamentRules.Event(s,request.Plan.EventId).Publication;
             BusinessIds.Officials(s,request.Plan);
             TournamentRules.ValidateEvent(s,request.Plan);
             TournamentRules.Save(s.EventPlans,request.Plan,x=>x.EventId);
@@ -82,19 +83,33 @@ public static class TournamentEndpoints
             {
                 TournamentRules.Need(Previews.ContainsKey(request.Token)&&preview.Expires>=DateTimeOffset.UtcNow&&preview.Revision==request.Revision,"Preview expired. Generate a fresh preview.");
                 var s=store.Read();SetupStore.CheckRevision(s,request.Revision);
-                TournamentRules.Need(preview.Plans.Length==1&&TournamentRules.Program(s,preview.Plans[0].ProgramId).Matches.Count==0,"Swap positions only in the first draw of one program.");
+                TournamentRules.Need(preview.Plans.Length==1,"Swap positions in one program at a time.");
+                var saved=TournamentRules.Program(s,preview.Plans[0].ProgramId);
+                var first=saved.Matches.Count==0;
+                var qualifier=!first&&saved.Format=="GK"&&saved.Phase=="G"&&saved.Matches.All(m=>m.Phase=="G"&&m.Status is MatchStatus.Completed or MatchStatus.Walkover);
+                TournamentRules.Need(first||qualifier,"Swap positions only in the first draw or the unconfirmed qualifier knockout opening round.");
                 var plan=JsonSerializer.Deserialize<ProgramPlan>(JsonSerializer.Serialize(preview.Plans[0],JsonDefaults.Options),JsonDefaults.Options)!;
-                var ids=plan.Matches.SelectMany(m=>new[]{m.EntryA,m.EntryB}).Where(id=>id is not null).ToHashSet();
+                // Live result metadata is excluded from JSON cloning; keep saved group rows intact.
+                var existing=saved.Matches.ToDictionary(m=>m.Id);
+                plan.Matches=plan.Matches.Select(m=>existing.GetValueOrDefault(m.Id)??m).ToList();
+                var existingIds=existing.Keys.ToHashSet();
+                var targets=plan.Matches.Where(m=>!existingIds.Contains(m.Id)).ToList();
+                if(qualifier)TournamentRules.Need(preview.Request.DrawOnly&&targets.Count>0&&targets.All(m=>m.Phase=="K"&&m.Round==1&&m.Start is null&&m.End is null&&m.Court is null&&m.Status is MatchStatus.Scheduled or MatchStatus.Bye),"Swap qualifier positions before confirming or scheduling the opening knockout round.");
+                var ids=targets.SelectMany(m=>new[]{m.EntryA,m.EntryB}).Where(id=>id is not null).ToHashSet();
                 TournamentRules.Need(request.EntryA!=request.EntryB&&ids.Contains(request.EntryA)&&ids.Contains(request.EntryB),"Choose two distinct entries from this draw.");
+                var groupOf=plan.Groups.SelectMany(g=>g.EntryIds.Select(id=>(id,g.Id))).ToDictionary(x=>x.id,x=>x.Id);
+                int SameGroup()=>targets.Count(m=>m.EntryB is not null&&groupOf.GetValueOrDefault(m.EntryA)==groupOf.GetValueOrDefault(m.EntryB));
+                var conflicts=qualifier?SameGroup():0;
                 string? Swap(string? id)=>id==request.EntryA?request.EntryB:id==request.EntryB?request.EntryA:id;
-                foreach(var m in plan.Matches){m.EntryA=Swap(m.EntryA)!;m.EntryB=Swap(m.EntryB);if(m.Status==MatchStatus.Bye)m.WinnerId=m.EntryA;}
-                plan.Groups=plan.Groups.Select(g=>g with{EntryIds=g.EntryIds.Select(id=>Swap(id)!).ToArray()}).ToList();
-                var swapped=plan.Matches;plan.Matches=[];
+                foreach(var m in targets){m.EntryA=Swap(m.EntryA)!;m.EntryB=Swap(m.EntryB);if(m.Status==MatchStatus.Bye)m.WinnerId=m.EntryA;}
+                if(qualifier)TournamentRules.Need(SameGroup()<=conflicts,"This swap would introduce a same-group opening knockout match. Choose a different pair.");
+                else plan.Groups=plan.Groups.Select(g=>g with{EntryIds=g.EntryIds.Select(id=>Swap(id)!).ToArray()}).ToList();
+                plan.Matches=plan.Matches.Where(m=>existingIds.Contains(m.Id)).ToList();
                 TournamentRules.Save(s.ProgramPlans,plan,p=>p.ProgramId);
-                if(!preview.Request.DrawOnly)TournamentScheduler.Schedule(s,TournamentRules.Event(s,preview.EventId),swapped,preview.Request);
-                plan.Matches=swapped;
+                if(!preview.Request.DrawOnly)TournamentScheduler.Schedule(s,TournamentRules.Event(s,preview.EventId),targets,preview.Request);
+                plan.Matches.AddRange(targets);
                 preview.Plans[0]=plan;TournamentRules.Save(s.ProgramPlans,plan,p=>p.ProgramId);
-                return new{token=request.Token,revision=request.Revision,matches=plan.Matches,groups=new[]{new{plan.ProgramId,plan.Groups}},view=View(s,preview.EventId)};
+                return new{token=request.Token,revision=request.Revision,matches=targets,groups=new[]{new{plan.ProgramId,plan.Groups}},view=View(s,preview.EventId)};
             }
         });
         group.MapPost("/confirm",(GenerationConfirm request,SetupStore store)=>

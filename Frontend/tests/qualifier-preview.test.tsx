@@ -1,0 +1,21 @@
+import {afterEach,expect,test,vi} from 'vitest';
+import {cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
+import TournamentConsole from '../src/TournamentConsole';
+const service=vi.hoisted(()=>({api:vi.fn()}));vi.mock('../src/api',()=>service);
+vi.mock('../src/RankingDecision',()=>({default:()=>null}));
+vi.mock('../src/fixture-adapter',()=>({seedEntries:()=>[],asBracket:()=>({}),formatName:{GK:'group_knockout'}}));
+vi.mock('../src/components/admin/fixtures/FixturePreview',()=>({FixturePreview:({allowSwap,onSwap,onConfirm}:{allowSwap:boolean;onSwap:(a:string,b:string)=>void;onConfirm:()=>void})=><div><button disabled={!allowSwap} onClick={()=>onSwap('a','b')}>Swap qualifiers</button><button onClick={onConfirm}>Confirm preview</button></div>}));
+afterEach(()=>{cleanup();vi.clearAllMocks();});
+test('qualifier preview enables swaps and names the BYE recipient with group origin',async()=>{
+ const saved={revision:2,eventInfo:{name:'Test Event',startDate:'2030-01-01',endDate:'2030-01-02'},dailySessions:[],eventPlan:{sessions:[],officials:[]},programs:[{id:'P',name:'Singles',sport:'Badminton'}],participants:[{id:'person',name:'Alice'}],entries:[{id:'a',programId:'P',participantIds:['person']}],plans:[{programId:'P',format:'GK',phase:'G',groupCount:3,advancePerGroup:1,lastRound:1,matches:[{phase:'G',status:'C'}]}],progress:[],presets:[{isDefault:true}],warnings:[],standings:[]};
+ const preview={token:'preview-token',revision:2,matches:[{entryA:'a',status:'BY'}],view:{...saved,plans:[{...saved.plans[0],qualificationOrigins:{a:'A1'}}]}};
+ service.api.mockImplementation(async(path:string)=>path==='tournament/E'?saved:path==='tournament/confirm'?saved:preview);
+ render(<TournamentConsole eventId="E" onChanged={async()=>{}} onEventSettings={()=>{}} onPresets={()=>{}}/>);
+ fireEvent.click(await screen.findByRole('button',{name:/Preview .* Draw/}));
+ expect(await screen.findByText('BYE recipients: Alice (A1)')).toBeTruthy();
+ expect((screen.getByRole('button',{name:'Swap qualifiers'}) as HTMLButtonElement).disabled).toBe(false);
+ fireEvent.click(screen.getByRole('button',{name:'Swap qualifiers'}));
+ await waitFor(()=>expect(service.api).toHaveBeenCalledWith('tournament/preview-swap','POST',{revision:2,token:'preview-token',entryA:'a',entryB:'b'}));
+ fireEvent.click(screen.getByRole('button',{name:'Confirm preview'}));
+ await waitFor(()=>expect(service.api).toHaveBeenCalledWith('tournament/confirm','POST',{revision:2,token:'preview-token'}));
+});

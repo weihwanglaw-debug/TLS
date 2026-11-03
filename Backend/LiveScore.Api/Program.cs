@@ -14,6 +14,11 @@ builder.Services.AddControllers();
 builder.Services.AddScoped<SbaLocalAdminFilter>();
 builder.Services.AddSingleton<SetupStore>();
 builder.Services.AddSingleton<LiveRuntime>();
+builder.Services.AddDataProtection();
+builder.Services.AddHttpClient("trs-publication", client => client.Timeout = TimeSpan.FromSeconds(10))
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddSingleton<TrsPublication>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<TrsPublication>());
 builder.Services.AddScoped<TrsIntegration>();
 var app = builder.Build();
 if (args.Contains("--initialize-sql") || args.Contains("--upgrade-imports") || args.Contains("--upgrade-tournament") || args.Contains("--upgrade-live") || args.Contains("--upgrade-sba") || args.Contains("--upgrade-business-ids") || args.Contains("--clear-test-records") || args.Contains("--schema-script"))
@@ -45,6 +50,7 @@ app.MapLive();
 GamePresets.Map(app);
 SeedingEndpoints.Map(app);
 TrsIntegration.Map(app);
+TrsPublication.Map(app);
 app.UseDefaultFiles(); app.UseStaticFiles();
 app.Map("/api/{**path}", () => Results.NotFound(new { message = "API endpoint not available." }));
 app.MapFallbackToFile("index.html");

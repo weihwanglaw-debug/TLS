@@ -175,3 +175,8 @@ Court assignment and START use the same session-court eligibility check. If a se
 ## Shared scoresheet progression graph — 2 November 2026
 
 The shared scoresheet renders a score progression chart below the scoring grids in the umpire view, console view and result-confirmation views, including printed scoresheets. It uses recorded rallies rather than reconstructing points from final scores. Each game has its own chart with player-name colours, point axis and recorded-rally count. Manual/resumed score jumps break the plotted lines, and incomplete histories carry an explanatory note. With no rallies recorded, the chart area states that no recorded rallies are available. Player-side identities remain fixed regardless of physical court-end changes. No new rally data is stored.
+
+
+## Point entry protection — 3 November 2026
+
+After accepting a new point tap, both point buttons remain disabled for 500 ms from that tap, and also for as long as the command is awaiting acknowledgement. A synchronous guard enforces the interval even before React renders. This prevents an accidental quick second tap on either side from becoming a second operation after a fast response. It does not replace server command idempotency or the pending-command retry mechanism. Undo last point is larger and outlined in the main controls and remains usable after acknowledgement during the point lockout. This is accidental double-tap protection, not a guarantee against a deliberate second tap after 500 ms.

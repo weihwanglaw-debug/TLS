@@ -345,3 +345,12 @@ Scores and saved configuration refresh every two seconds. Pages rotate only when
 `GET /api/display` is restricted to the venue network and loopback, following tablet network eligibility. It exposes an explicit spectator projection with match names, event/program/round, court, scores, serving side and match state. No tablet credentials, device identity/IP, official contact data or organiser commands are exposed. Existing organiser access restrictions remain unchanged. `PUT /api/setup/settings` accepts optional `liveDisplay`; all values are validated on the server. Older clients may omit it.
 
 Display settings are stored as `display` in `SystemSettings.LiveVenueJson`. Before rolling back to a binary predating this feature, back up that JSON and remove only the new `display` property, retaining presets, court closures and bindings; older binaries reject unknown JSON fields. Removing frontend display/graph components does not alter scores or rally history.
+
+
+## Multi-client rehearsal — 3 November 2026
+
+Run `python tests/venue_load_rehearsal.py --seconds 20 --entries 32` from the TLS root after the normal backend build. The script creates and removes a disposable TLS_Test SQL database. Its default fixture has 8 programs, 256 participants, 128 scheduled opening-round matches and 8 active courts/tablets. Each tablet submits about one point per second, polls its match every 2 seconds and sends heartbeats every 5 seconds. One dashboard and successively 0, 2 and 4 display clients poll every 2 seconds. Each phase lasts 20 seconds by default; allowed durations are 5–25 seconds to keep the synthetic 50-point games in progress. `--entries 4` provides a smaller comparison fixture. Reported measurements are end-to-end HTTP request latency, not browser paint time. Final confirmed scores and rally counts must equal the submitted commands.
+
+This is a local HTTP/SQL load rehearsal; it does not simulate physical tablet rendering, RF interference, device sleep or network latency. Validate those with eight real tablets and the intended display screens at the venue, followed by a longer rehearsal with a full event dataset. Do not infer long-duration audit growth or full-event capacity from a one-minute run. No caching or storage changes are bundled with the benchmark.
+
+Results and venue follow-up: [3 November rehearsal report](VENUE_REHEARSAL_20261103.md).

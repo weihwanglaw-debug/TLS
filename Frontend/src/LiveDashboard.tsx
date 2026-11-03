@@ -1,3 +1,4 @@
+import {TrsPublishingBadge} from './TrsPublishing';
 import OfficialsEditor,{officialRows,officialAssignment,officialsError,type OfficialRow} from './OfficialsEditor';
 import PaperScoresheet from './PaperScoresheet';
 import ScoresheetButton from './ScoresheetButton';
@@ -80,6 +81,7 @@ export default function LiveDashboard({onFixtures,onChanged,onEventSettings,onPr
  function courtLabel(c:LiveCourt){return c.outsideEvent?'Occupied by another event':courtLabels[c.status];}
 
  return <div>
+  <TrsPublishingBadge eventId={eventId}/>
   {offline&&<div role="alert" className="notice error"><AlertTriangle className="h-4 w-4"/><span>Server connection lost. Data is stale; last update {updated?time(new Date(updated+offset.current).toISOString()):'unknown'}. Court controls are disabled.</span></div>}
   <ActionMessage message={error}/><ActionMessage message={message} variant="success"/>
   <div className="dashboard-event-header"><div className="dashboard-event-selection"><FG label="Event"><select aria-label="Dashboard event" disabled={busy} className="field-input w-full md:w-72" value={eventId} onChange={e=>selectEvent(e.target.value)}><option value="" disabled>Select an event</option>{data.events.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}</select></FG>{selectedEvent&&<EventDateBadge event={selectedEvent} today={data.serverLocalTime.slice(0,10)}/>}</div><div className="dashboard-connection"><span className="text-xs opacity-70">Venue time: {data.serverLocalTime.replace('T',' ').slice(0,16)} · {data.timeZone}</span><Badge label={offline?'Server disconnected':'Server connected'} kind={offline?'bad':'good'}/></div></div>

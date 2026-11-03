@@ -101,3 +101,49 @@ Check(SessionCourts.EligibleCourts(courtData,courtPlan,queued,new(2030,1,1,10,0,
 queued.Start=new(2030,1,2,10,0,0);Check(SessionCourts.EligibleCourts(courtData,courtPlan,queued,new(2030,1,1,14,0,0)).SequenceEqual(new[]{3}),"future-day preparation uses planned session allocation");
 queued.Start=null;Check(SessionCourts.EligibleCourts(courtData,courtPlan,queued,new(2030,1,1,10,0,0)).Length==0,"unscheduled match requires scheduling");
 Console.WriteLine($"PASS: {checks} total focused rules checks");
+
+// Changing database IDs must not change qualifier slots or BYE recipients.
+foreach(var groupCount in new[]{2,3,4})foreach(var advance in new[]{1,2})
+{
+    string? baseline=null;
+    foreach(var variant in new[]{0,1,2})
+    {
+        var qp=new ProgramPlan{ProgramId="Q",Format="GK",Phase="G",AdvancePerGroup=advance,SeedsReviewed=true};
+        for(var i=0;i<groupCount;i++)
+        {
+            var winner=variant==0?$"Z{i}":variant==1?$"A{groupCount-i}":$"M{(i+1)%groupCount}";
+            var runner=$"R{variant}{i}";var gid=$"G{i}";
+            qp.Groups.Add(new(gid,$"Group {(char)('A'+i)}",[winner,runner]));
+            qp.Matches.Add(new(){Id=gid,ProgramId="Q",Phase="G",GroupId=gid,EntryA=winner,EntryB=runner,WinnerId=winner,Status="C",Games=[new(21,0),new(21,0)]});
+        }
+        if(groupCount==3&&advance==1&&variant==0)
+        {
+            var seeded=System.Text.Json.JsonSerializer.Deserialize<ProgramPlan>(System.Text.Json.JsonSerializer.Serialize(qp))!;
+            var top=seeded.Groups[2].EntryIds[0];seeded.Seeds[top]=1;
+            Check(TournamentRules.CreateRound(new SetupData(),seeded).Single(m=>m.Status=="BY").EntryA==top,"sporting seed precedes group order for BYE allocation");
+        }
+        var before=System.Text.Json.JsonSerializer.Serialize(qp.Matches);
+        var rows=TournamentRules.CreateRound(new SetupData(),qp);
+        var signature=string.Join("|",rows.Select(m=>qp.QualificationOrigins[m.EntryA]+":"+(m.EntryB is null?"BYE":qp.QualificationOrigins[m.EntryB])));
+        baseline??=signature;Check(signature==baseline,$"group-origin placement independent of IDs: {groupCount}/{advance}/{variant}");
+        Check(rows.SelectMany(m=>new[]{m.EntryA,m.EntryB}).Where(id=>id is not null).Distinct().Count()==groupCount*advance,"every qualifier appears exactly once");
+        Check(System.Text.Json.JsonSerializer.Serialize(qp.Matches)==before,"group results untouched by qualifier generation");
+    }
+}
+Console.WriteLine($"PASS: {checks} total focused rules and qualifier placement checks");
+{
+    var publicationData = new SetupData {
+        Events = [new("EV000001", "Open", "Hall", new(2026,11,3), new(2026,11,3))],
+        Programs = [new("PUBLISH-P", "EV000001", "Singles", "Badminton", "S", 1, 1, 0, 100, "O", 2, 32, "E")],
+        Participants = [new("U1", "EV000001", "Alice", new(2000,1,1), "F", "a@example.com", "+6581234567"), new("U2", "EV000001", "Beth", new(2000,1,1), "F", "b@example.com", "+6581234568")],
+        Entries = [new("E1", "EV000001", "PUBLISH-P", ["U1"]), new("E2", "EV000001", "PUBLISH-P", ["U2"])],
+        ImportIdentities = new() { ["event"] = new("EV000001","event","event:71","EV000001"), ["program"] = new("EV000001","program","program:72","PUBLISH-P"), ["entry"] = new("EV000001","entry","entry:91","E1") },
+        ProgramPlans = [new() { ProgramId = "PUBLISH-P", Matches = [new() { Id = "LIVE1", ProgramId = "PUBLISH-P", Phase = "K", Round = 1, RoundLabel = "Final", EntryA = "E1", EntryB = "E2", Status = "IP", Games = [new(21,19)], Live = new() { A=5, B=7 } }] }]
+    };
+    var publication = TrsPublication.Snapshot(publicationData,"EV000001",null,true);
+    Check(publication.EventId==71 && publication.ProgramId is null && publication.Matches.Single().ProgramId==72,"live publication original TRS event/program identity");
+    Check(publication.Matches[0].ScoreA==5 && publication.Matches[0].ScoreB==7 && publication.Matches[0].Games.Single()==new GameScore(21,19),"live publication aligns current and previous scores");
+    Check(publication.Matches[0].Team1.Id=="entry:91" && publication.Matches[0].Team1.Players.Single()=="Alice","live publication describes original entry and players");
+    Check(TrsPublication.Snapshot(publicationData,"EV000001","PUBLISH-P",false).Matches.Length==0,"unconfirmed live matches never enter official result snapshots");
+}
+Console.WriteLine($"PASS: {checks} including TRS publication checks");

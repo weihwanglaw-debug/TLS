@@ -2,6 +2,7 @@ namespace LiveScore.Api;
 
 public sealed class EventPlan
 {
+    public TrsPublicationSettings Publication { get; set; } = new();
     public PlanningDraft? PlanningDraft { get; set; }
     public string EventId { get; set; } = "";
     public List<DailySession> DailySessions { get; set; } = [];
