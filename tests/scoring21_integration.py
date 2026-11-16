@@ -42,7 +42,7 @@ try:
    rules={'name':'21-point best of three','gamesToWin':2,'pointsToWin':21,'winBy':2,'pointCap':30,'intervalAt':11,'decidingEndsAt':11,'cardsEnabled':True,'challengesEnabled':True,'challengesPerGame':2,'countShuttles':True}
    preset=call('presets/',{'revision':view()['revision'],'preset':{'id':'','name':rules['name'],'rules':rules,'status':'A','isDefault':True}},method='PUT')['presets'][0]['id']
    for pid in pids.values():
-    draft=mutate('preview',{'eventId':eid,'programIds':[pid],'courts':[1,2],'earliestStart':str(first)+'T00:00:00','settings':{'format':'KO','groupCount':1,'advancePerGroup':1},'seeds':{e['id']:None for e in saved['entries'] if e['programId']==pid}},method='POST');mutate('confirm',{'token':draft['token']},method='POST')
+    draft=mutate('preview',{'eventId':eid,'programIds':[pid],'courts':[1,2],'earliestStart':str(now.date())+'T00:00:00','settings':{'format':'KO','groupCount':1,'advancePerGroup':1},'seeds':{e['id']:None for e in saved['entries'] if e['programId']==pid}},method='POST');mutate('confirm',{'token':draft['token']},method='POST')
    matches={p['programId']:p['matches'][0] for p in view()['plans']};m=matches[pids['Doubles']]
    def pair(m,court,official,review=True,status=200,reason=''):
     return call('dashboard/pair',{'revision':view()['revision'],'matchId':m['id'],'court':court,'umpireId':next(o['id'] for o in view()['eventPlan']['officials'] if o['name']=={'O1':'Official One','O2':'Official Two'}[official]),'presetId':preset,'reviewAvailable':review,'reason':reason},status)
@@ -59,7 +59,7 @@ try:
    command('START',serving=setup)
    command('CARD',participantId=a[0],cardType='B',remark='Referee annotation test')
    assert current['match']['status']=='IP'
-   command('POINT','A');command('UNDO')
+   command('POINT','A');command('UNDO_POINT')
    print('CONFIRMED: Black card recorded; match remains IP and accepts subsequent points.')
    for i in range(20):command('POINT','A');command('POINT','B')
    assert not current['match']['awaitingNextGame']
@@ -67,13 +67,18 @@ try:
    for i in range(8):command('POINT','A');command('POINT','B')
    assert current['match']['scoreA']==29 and current['match']['scoreB']==29
    command('POINT','A');assert current['match']['games']==[{'a':30,'b':29}]
-   command('UNDO');assert current['match']['scoreA']==29 and not current['match']['games']
+   command('UNDO_POINT');assert current['match']['scoreA']==29 and not current['match']['games']
    command('POINT','A');command('NEXT',serving={**setup,'leftSide':'B'})
+   # At 0-0 in the next game, undo targets the previous game's winning point.
+   command('UNDO_POINT');assert current['match']['scoreA']==29 and current['match']['scoreB']==29 and not current['match']['games'] and not current['match']['awaitingNextGame']
+   command('POINT','A');command('NEXT',serving={**setup,'leftSide':'B'})
+   command('POINT','B');command('UNDO_POINT')
+   assert current['match']['scoreA']==0 and current['match']['scoreB']==0 and current['match']['games']==[{'a':30,'b':29}]
    for i in range(21):command('POINT','B')
    command('NEXT',serving={'serverSide':'B','serverId':b[0],'receiverId':a[0],'leftSide':'A'})
    for i in range(21):command('POINT','A')
    assert current['match']['matchWon']
-   command('UNDO');assert not current['match']['matchWon']
+   command('UNDO_POINT');assert not current['match']['matchWon']
    command('POINT','A');command('SUBMIT');assert current['match']['status']=='RC'
    call('dashboard/confirm',{'revision':view()['revision'],'matchId':m['id'],'version':current['match']['version']})
    print(f'PASS: {checks} API assertions; full 21-point deuce, 29-all/30-29, game/match-point undo, three games and confirmation.')

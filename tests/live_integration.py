@@ -90,6 +90,20 @@ try:
         player=next(e for e in saved['entries'] if e['id']==a['entryA'])['participantIds'][0]
         def detail(action,**extra):
             return command(tokenA,action,body={'version':sessions[tokenA]['match']['version'],'operationId':str(uuid.uuid4()),'action':action,**extra})[0]
+        scoreBefore=(sessions[tokenA]['match']['scoreA'],sessions[tokenA]['match']['scoreB'])
+        command(tokenA,'POINT','A');command(tokenA,'POINT','A')
+        undone,undoRequest=command(tokenA,'UNDO_POINT')
+        undoReplay=call('tablet/command',undoRequest,token=tokenA)
+        assert undoReplay['match']['version']==undone['match']['version'] and undoReplay['match']['scoreA']==scoreBefore[0]+1
+        command(tokenA,'UNDO_POINT')
+        assert (sessions[tokenA]['match']['scoreA'],sessions[tokenA]['match']['scoreB'])==scoreBefore
+        assert detail('SHUTTLE')['match']['resultDetails']['shuttlesUsed']==1
+        decremented,minusRequest=command(tokenA,'SHUTTLE_MINUS')
+        assert decremented['match']['resultDetails']['shuttlesUsed']==0
+        replay=call('tablet/command',minusRequest,token=tokenA)
+        assert replay['match']['version']==decremented['match']['version'] and replay['match']['resultDetails']['shuttlesUsed']==0
+        command(tokenA,'SHUTTLE_MINUS',status=400)
+        assert (sessions[tokenA]['match']['scoreA'],sessions[tokenA]['match']['scoreB'])==scoreBefore
         assert detail('SHUTTLE')['match']['resultDetails']['shuttlesUsed']==1
         assert detail('CARD',participantId=player,cardType='Y')['match']['resultDetails']['cards'][0]['participantId']==player
         detail('CHALLENGE',side='A',outcome='U');detail('CHALLENGE',side='A',outcome='U')
@@ -135,6 +149,8 @@ try:
         admin('pair',{'matchId':cm[0]['id'],'court':3,'umpireId':event+'-O001','presetId':presetId,'reviewAvailable':True},400)
         admin('confirm',{'matchId':a['id'],'version':sessions[tokenA2]['match']['version']});assert dashboard()['courts'][0]['status']=='A';assert next(p for p in dashboard()['programs'] if p['id']==pids['A'])['ready'];call('tablet/state',status=401,token=tokenA2)
         assert next(o for o in dashboard()['officials'] if o['id']==event+'-O001')['reservations']==[]
+        shown=next(m for m in call('display')['matches'] if m['court']==1)
+        assert shown['id']==a['id'] and shown['status']=='C' and shown['winner']=='A' and shown['games']==sessions[tokenA2]['match']['games']
         command(tokenB,'START',status=400);assert dashboard()['courts'][1]['status']=='P'
         nextGen=call('tournament/preview',{'revision':view()['revision'],**gen,'programIds':[pids['A']],'earliestStart':datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None).isoformat()})
         command(tokenB,'POINT','A');call('tournament/confirm',{'revision':nextGen['revision'],'token':nextGen['token']})
@@ -192,7 +208,10 @@ try:
         # Closed courts are excluded from fixture generation and reductions respect venue state.
         admin('court',{'court':4,'closed':True});call('setup/settings',{'revision':setup()['revision'],'timeZone':'Asia/Singapore','courtCount':3},400,method='PUT');admin('court',{'court':4,'closed':False})
         # The manual TRS-style result editor consumes tablet data without replacing its timestamps/details.
-        reviewToken=tablet(pair(cm[0],1,event+'-O001')['code'],'Review tablet');command(reviewToken,'START')
+        reviewToken=tablet(pair(cm[0],1,event+'-O001')['code'],'Review tablet')
+        assert next(m for m in call('display')['matches'] if m['court']==1)['id']==a['id']
+        command(reviewToken,'START')
+        assert next(m for m in call('display')['matches'] if m['court']==1)['id']==cm[0]['id']
         reviewPlayer=sessions[reviewToken]['match']['players'][0]['id']
         command(reviewToken,'CARD',body={'version':sessions[reviewToken]['match']['version'],'operationId':str(uuid.uuid4()),'action':'CARD','participantId':reviewPlayer,'cardType':'Y'})
         for _ in range(5):command(reviewToken,'POINT','A')
@@ -209,6 +228,11 @@ try:
         corrected=next(m for p in view()['plans'] for m in p['matches'] if m['id']==record['id']);assert corrected['resultDetails']==record['resultDetails']
         before=dashboard();stop();start();assert dashboard()['courtCount']==4 and dashboard()['courts'][0]['status']=='A'
         db.command('--upgrade-live','true');assert int(db._sql('audit'))>10
+        shown=next(m for m in call('display')['matches'] if m['court']==1)
+        assert shown['id']==record['id'] and shown['status']=='C' and shown['games']==[{'a':5,'b':1}]
+        rounds=call('tournament/'+event+'/reset-schedule')
+        call('tournament/reset-schedule',{'revision':rounds['revision'],'eventId':event,'roundKeys':[r['key'] for r in rounds['rounds']]})
+        assert call('display')['matches']==[]
         print(f'PASS: {checks} live HTTP assertions; pairing, actual IP, heartbeat loss/recovery, restart, replacement, command idempotency/concurrency, available-court moves and reservation protection, paper reconciliation and independent program advancement.')
     finally:
         stop();log.close()

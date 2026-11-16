@@ -30,7 +30,7 @@ public static class EventOperations
         var eventPlan=TournamentRules.Event(s,s.Programs.Single(p=>p.Id==m.ProgramId).EventId);
         TournamentRules.Need(m.Start.HasValue&&m.End.HasValue&&Courts(s,eventPlan).Contains(m.Court??0),"Schedule the match date, time and court before starting.");
     }
-    public static bool Started(SetupData s,string eventId)=>Programs(s,eventId).SelectMany(p=>p.Matches).Any(m=>m.Status is not (MatchStatus.Scheduled or MatchStatus.Bye)||(m.Live?.Corrections.Count??0)>0);
+    public static bool Started(SetupData s,string eventId)=>Programs(s,eventId).SelectMany(p=>p.Matches).Any(FixtureResets.StartedOrScored);
 }
 
 public sealed record DailySession(TimeOnly Start,TimeOnly End);

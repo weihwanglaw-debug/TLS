@@ -44,15 +44,18 @@ try:
    missing={'eventId':eid,'programIds':[pids[0]],'courts':[],'drawOnly':True};request('tournament/preview',missing,400)
    assert not matches(pids[0])
    preset=request('presets/',{'preset':{'id':'','name':'Five','status':'A','isDefault':True,'rules':rules}},method='PUT')['presets'][0]
+   assert preset['rules']['warmupSeconds']==120
+   for seconds in [-1,601]:
+    request('presets/',{'preset':{**preset,'rules':{**preset['rules'],'warmupSeconds':seconds}}},400,'PUT')
    def draw(pid):
     entries=[e for e in saved['entries'] if e['programId']==pid];request('seeding/'+pid,{'mode':'N','seedCount':0,'seeds':{e['id']:None for e in entries}},method='PUT')
     p=request('tournament/preview',{'eventId':eid,'programIds':[pid],'courts':[1,2,3,4],'earliestStart':day+'T00:00:00','settings':{'format':'KO','groupCount':1,'advancePerGroup':1}})
     assert all(m['rulesAssigned'] and m['presetId']==preset['id'] for m in p['matches'] if m['status']!='BY')
     request('tournament/confirm',{'token':p['token']})
    draw(pids[0]);draw(pids[1]);assert any(m['status']=='BY' for m in matches(pids[1]))
-   changed={**preset,'rules':{**rules,'pointsToWin':9,'pointCap':11}}
-   request('presets/',{'preset':changed},method='PUT');assert all(m['rules']['pointsToWin']==5 for m in matches(pids[0]))
-   other=request('presets/',{'preset':{'id':'','name':'Seven','status':'A','isDefault':True,'rules':{**rules,'pointsToWin':7,'pointCap':9}}},method='PUT')['presets'][-1]
+   changed={**preset,'rules':{**rules,'pointsToWin':9,'pointCap':11,'warmupSeconds':180}}
+   request('presets/',{'preset':changed},method='PUT');assert all(m['rules']['pointsToWin']==5 and m['rules']['warmupSeconds']==120 for m in matches(pids[0]))
+   other=request('presets/',{'preset':{'id':'','name':'Seven','status':'A','isDefault':True,'rules':{**rules,'pointsToWin':7,'pointCap':9,'warmupSeconds':0}}},method='PUT')['presets'][-1]
    assert sum(p['isDefault'] for p in call('presets/')['presets'])==1
    assert all(m['presetId']==preset['id'] for m in matches(pids[0]))
    def assign(m,presetId,confirm=False,status=200):
@@ -65,6 +68,7 @@ try:
    call('tablet/state',token=token,status=401)
    secondToken=call('tablet/pair',{'code':codes[1],'deviceId':'round-device-2','deviceName':'Second Tablet'})['token']
    assert matches(pids[0])[0]['rules']['pointsToWin']==7 and matches(pids[0])[1]['rules']['pointsToWin']==5
+   assert matches(pids[0])[0]['rules']['warmupSeconds']==0 and matches(pids[0])[1]['rules']['warmupSeconds']==120
    other['rules']['pointsToWin']=11;other['rules']['pointCap']=13;request('presets/',{'preset':other},method='PUT');assign(ms[0],other['id']);assert matches(pids[0])[0]['rules']['pointsToWin']==7
    m=matches(pids[0])[0];paired=request('dashboard/pair',{'matchId':m['id'],'court':m['court'],'umpireId':view()['eventPlan']['officials'][0]['id'],'presetId':other['id']});token=call('tablet/pair',{'code':paired['code'],'deviceId':'round-device-3','deviceName':'Start Tablet'})['token'];state=call('tablet/state',token=token)['match']
    import uuid
@@ -78,8 +82,8 @@ try:
    request('tournament/result',{'matchId':m['id'],'matchVersion':m['matchVersion'],'games':[],'walkoverWinner':m['entryA']},method='PUT')
    recorded=next(x for x in matches(pids[1]) if x['id']==m['id']);assert recorded['presetLocked']
    request('tournament/clear-result',{'matchId':m['id'],'matchVersion':recorded['matchVersion'],'reason':'Correct erroneous walkover'})
-   assign(m,other['id'],True,400);request('tournament/reset',{'programId':pids[1]},400)
-   before=matches(pids[1]);stop();start();assert matches(pids[1])==before;assign(m,other['id'],True,400)
+   assign(m,other['id'],True);request('tournament/reset',{'programId':pids[1]},400)
+   before=matches(pids[1]);stop();start();assert matches(pids[1])==before;assign(m,other['id'],True)
    bad=copy.deepcopy(other);bad['status']='X';request('presets/',{'preset':bad},400,'PUT')
    assert len(call('setup/')['data']['participants'])==11
    print(f'PASS: {checks} preset HTTP checks; required defaults, frozen match rules, independent siblings, starts, clear protection, restart and targeted tablet revocation.')

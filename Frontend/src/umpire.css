@@ -35,7 +35,8 @@ body:has(.umpire-shell){overflow:hidden;overscroll-behavior:none;}
 @media(max-height:520px) and (orientation:landscape){.umpire-shell{padding:6px;gap:5px;grid-template-rows:38px 24px minmax(0,1fr) 54px 48px 48px;}.umpire-brand{font-size:20px;}.umpire-match h1{font-size:18px;}.umpire-match p{font-size:10px;}.court-player strong{font-size:16px;}.court-score{font-size:52px;}.court-position{padding:4px;}.serve-label,.card-label{font-size:9px;}.counter strong{font-size:30px;}.counter>span{font-size:9px;}.shuttles button{font-size:11px;padding:4px 6px;min-height:28px;}.point-button{font-size:24px;}.umpire-actions button{font-size:11px;}.umpire-header .venue-status{font-size:10px;}}
 @media print{body:has(.umpire-shell){overflow:visible;}body:has(.umpire-shell) #root{display:none;}.umpire-dialog{position:static;transform:none;max-width:none;max-height:none;overflow:visible;border:0;box-shadow:none;}.umpire-dialog button{display:none;}[data-radix-dialog-overlay]{display:none;}}
 
-.match-step-button{grid-column:1 / -1;background:var(--color-primary);color:var(--color-hero-text);font-size:24px;font-weight:700;border-radius:4px;}
+.match-step-button{grid-column:1 / -1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;background:var(--color-primary);color:var(--color-hero-text);font-size:24px;font-weight:700;border-radius:4px;font-variant-numeric:tabular-nums;padding:4px 8px;line-height:1.15;}
+.match-step-button small{font-size:13px;font-weight:600;}.match-step-button:disabled{cursor:default;}.match-step-button.countdown-warning{background:#ffd166;color:#332300;}.match-step-button:disabled:not(.countdown-warning){opacity:.8;}
 .umpire-gamebar>span:last-child{flex-shrink:0;}
 @media(orientation:portrait){.umpire-shell:not(.umpire-join){grid-template-rows:76px 42px minmax(0,1fr) 90px 76px 100px;}.umpire-shell:not(.umpire-join) .umpire-header{grid-template-rows:44px 26px;gap:6px;}}
 @media print{body:has(.umpire-shell)>div[data-state="open"]:not([role="dialog"]){display:none;}.umpire-dialog{translate:none!important;inset:auto;width:100%;margin:0;}}
@@ -52,3 +53,7 @@ body:has(.umpire-shell){overflow:hidden;overscroll-behavior:none;}
 .umpire-actions{grid-template-columns:1.4fr 1fr 1fr 1fr}.umpire-actions .umpire-undo{font-size:17px;font-weight:800;border:2px solid var(--color-primary);color:var(--color-primary);min-height:44px}.umpire-actions .umpire-undo svg{width:24px;height:24px}
 
 @media(orientation:portrait){.umpire-actions{grid-template-columns:1fr 1fr}}
+
+.umpire-shell.umpire-complete{grid-template-rows:1fr;place-items:center;overflow:auto;padding:24px;}.umpire-submitted{width:min(100%,520px);padding:40px 24px;text-align:center;border:1px solid var(--color-table-border);background:var(--color-row-hover);}.umpire-submitted h1{font-size:30px;font-weight:700;line-height:1.25;color:var(--color-heading);}.umpire-submitted p{font-size:18px;line-height:1.5;margin:16px 0 32px;}.umpire-submitted button{min-height:48px;padding:12px 24px;font-size:16px;font-weight:600;}
+
+.shuttles>div{gap:8px}.shuttles button{min-width:44px;min-height:44px;padding:4px;font-size:24px;font-weight:700}.shuttles button:disabled{opacity:.35}

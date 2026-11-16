@@ -45,7 +45,7 @@ public static class TournamentScheduler
 
             var dependency=EventOperations.PrerequisiteEnd(data,match);
 
-            var earliest=request.EarliestStart;if(dependency!=DateTime.MinValue&&earliest<dependency.AddMinutes(eventPlan.RestMinutes))earliest=dependency.AddMinutes(eventPlan.RestMinutes);
+            var earliest=request.EarliestStart;if(dependency!=DateTime.MinValue&&earliest<dependency)earliest=dependency;
 
             var duration=request.MatchMinutes??eventPlan.MatchMinutes;
 
@@ -76,7 +76,7 @@ public static class TournamentScheduler
 
                         var conflicts=existing.Select(m=>new {Match=m,PlayerConflict=TournamentRules.Players(data,m).Overlaps(players)})
 
-                            .Where(x=>TournamentRules.Overlap(time,time.AddMinutes(duration),Begin(x.Match).AddMinutes(x.PlayerConflict?-eventPlan.RestMinutes:0),Finish(x.Match).AddMinutes(x.PlayerConflict?eventPlan.RestMinutes:0))
+                            .Where(x=>TournamentRules.Overlap(time,time.AddMinutes(duration),Begin(x.Match),Finish(x.Match))
 
                                 &&(x.Match.Court==court||TournamentRules.OfficialIds(x.Match).Contains(official.Id)||TournamentRules.OfficialIds(x.Match).Intersect(TournamentRules.OfficialIds(match)).Any()||x.PlayerConflict)).ToList();
 
@@ -88,7 +88,7 @@ public static class TournamentScheduler
 
                         }
 
-                        var next=conflicts.Max(x=>Finish(x.Match).AddMinutes(x.PlayerConflict?eventPlan.RestMinutes:0));
+                        var next=conflicts.Max(x=>Finish(x.Match));
 
                         time=next>time?next:time.AddMinutes(1);
 
@@ -98,7 +98,7 @@ public static class TournamentScheduler
 
             }
 
-            TournamentRules.Need(best.HasValue,$"Cannot fit match {match.Number} within the event's sessions. Add sessions, use more courts/officials, or review match duration and rest. No fixtures were saved.");
+            TournamentRules.Need(best.HasValue,$"Cannot fit match {match.Number} within the event's sessions. Add sessions, use more courts/officials, or review match duration. No fixtures were saved.");
 
             match.Start=best!.Value.Start;match.End=match.Start.Value.AddMinutes(duration);match.Court=best.Value.Court;match.UmpireId=assignOfficials?best.Value.Official:null;match.DurationMinutes=duration;
 
@@ -122,9 +122,9 @@ public static class TournamentScheduler
 
         {
 
-            var plan=EventRest(data,next);var shared=TournamentRules.Players(data,played).Overlaps(TournamentRules.Players(data,next));
+            var shared=TournamentRules.Players(data,played).Overlaps(TournamentRules.Players(data,next));
 
-            if(TournamentRules.Overlap(next.Start!.Value,next.End!.Value,Begin(played),Finish(played).AddMinutes(shared?plan:0))&&(next.Court==played.Court||OfficialIdsOverlap(next,played)||shared))
+            if(TournamentRules.Overlap(next.Start!.Value,next.End!.Value,Begin(played),Finish(played))&&(next.Court==played.Court||OfficialIdsOverlap(next,played)||shared))
 
                 messages.Add($"Match {next.Number} conflicts with the recorded finish of match {played.Number}. Review the remaining schedule.");
 
@@ -136,13 +136,20 @@ public static class TournamentScheduler
 
     private static bool OfficialIdsOverlap(TournamentMatch a,TournamentMatch b)=>TournamentRules.OfficialIds(a).Intersect(TournamentRules.OfficialIds(b)).Any();
 
-    private static int EventRest(SetupData data,TournamentMatch m)=>TournamentRules.Event(data,data.Programs.Single(p=>p.Id==m.ProgramId).EventId).RestMinutes;
+
 
     public static void ValidateOverride(SetupData data,TournamentMatch match)
 
     {
 
         var program=data.Programs.Single(p=>p.Id==match.ProgramId);var plan=TournamentRules.Event(data,program.EventId);
+        if(plan.SchedulePlanner is not null&&match.Start.HasValue&&SchedulePlanner.Grid(match.Start.Value)!=match.Start.Value)
+        {
+            var slot=SchedulePlanner.Slots(data,program.EventId).SingleOrDefault(n=>n.MatchId==match.Id);
+            var original=plan.SchedulePlanner.Bookings.SingleOrDefault(b=>b.SlotId==slot?.Id);
+            TournamentRules.Need(original is not null&&original.Start==match.Start&&original.Court==match.Court&&original.Minutes==match.DurationMinutes,"Planned match starts must use the 15-minute grid.");
+        }
+        SchedulePlanner.ValidateCurrentOverride(data,program.EventId,match);
 
         TournamentRules.Need(match.Court>=1&&match.Court<=data.CourtCount&&EventOperations.Courts(data,plan).Contains(match.Court??0)&&match.Start.HasValue&&match.End.HasValue&&TournamentRules.InsideMatch(data,plan,match),"Court and time must fit the event courts and a playing session.");
 
@@ -155,7 +162,7 @@ public static class TournamentScheduler
 
         var dependency=EventOperations.PrerequisiteEnd(data,match);
 
-        TournamentRules.Need(dependency==DateTime.MinValue||match.Start>=dependency.AddMinutes(plan.RestMinutes),"The next round must start after its prerequisite matches and player rest.");
+        TournamentRules.Need(dependency==DateTime.MinValue||match.Start>=dependency,"The next round must start after its prerequisite matches.");
 
         var players=TournamentRules.Players(data,match);
 
@@ -165,9 +172,9 @@ public static class TournamentScheduler
 
             var shared=TournamentRules.Players(data,other).Overlaps(players);
 
-            if(!TournamentRules.Overlap(match.Start.Value,match.End!.Value,other.Start!.Value.AddMinutes(shared?-plan.RestMinutes:0),Finish(other).AddMinutes(shared?plan.RestMinutes:0)))continue;
+            if(!TournamentRules.Overlap(match.Start.Value,match.End!.Value,Begin(other),Finish(other)))continue;
 
-            TournamentRules.Need(other.Court!=match.Court&&!TournamentRules.OfficialIds(other).Intersect(ids).Any()&&!shared,"This override conflicts with a court, player/rest period or official assignment.");
+            TournamentRules.Need(other.Court!=match.Court&&!TournamentRules.OfficialIds(other).Intersect(ids).Any()&&!shared,"This override conflicts with a court, player overlap or official assignment.");
 
         }
 

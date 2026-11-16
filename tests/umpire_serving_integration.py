@@ -41,7 +41,7 @@ try:
    rules={'name':'Five point best of three','gamesToWin':2,'pointsToWin':5,'winBy':2,'pointCap':7,'intervalAt':3,'decidingEndsAt':3,'cardsEnabled':True,'challengesEnabled':True,'challengesPerGame':2,'countShuttles':True}
    preset=call('presets/',{'revision':view()['revision'],'preset':{'id':'','name':rules['name'],'rules':rules,'status':'A','isDefault':True}},method='PUT')['presets'][0]['id']
    for pid in pids.values():
-    draft=mutate('preview',{'eventId':eid,'programIds':[pid],'courts':[1,2],'earliestStart':str(first)+'T00:00:00','settings':{'format':'KO','groupCount':1,'advancePerGroup':1},'seeds':{e['id']:None for e in saved['entries'] if e['programId']==pid}},method='POST');mutate('confirm',{'token':draft['token']},method='POST')
+    draft=mutate('preview',{'eventId':eid,'programIds':[pid],'courts':[1,2],'earliestStart':str(now.date())+'T00:00:00','settings':{'format':'KO','groupCount':1,'advancePerGroup':1},'seeds':{e['id']:None for e in saved['entries'] if e['programId']==pid}},method='POST');mutate('confirm',{'token':draft['token']},method='POST')
    matches={p['programId']:p['matches'][0] for p in view()['plans']};m=matches[pids['Doubles']]
    def pair(m,court,official,review=True,status=200,reason=''):
     return call('dashboard/pair',{'revision':view()['revision'],'matchId':m['id'],'court':court,'umpireId':next(o['id'] for o in view()['eventPlan']['officials'] if o['name']=={'O1':'Official One','O2':'Official Two'}[official]),'presetId':preset,'reviewAvailable':review,'reason':reason},status)
@@ -57,16 +57,27 @@ try:
    setup={'serverSide':'A','serverId':a[0],'receiverId':b[0],'leftSide':'A'}
    command('START',status=400);command('START',status=400,serving={**setup,'receiverId':a[0]});command('START',serving=setup)
    assert current['match']['serverId']==a[0] and current['match']['receiverId']==b[0]
+   command('SETUP',serving=setup,remark='Confirm initial positions')
+   assert current['match']['canUndo'] and not current['match']['canUndoPoint']
+   command('UNDO_POINT',status=400);command('UNDO')
    command('POINT','A');assert current['match']['serverId']==a[0] and current['match']['receiverId']==b[1]
    command('POINT','B');assert current['match']['serverId']==b[1] and current['match']['receiverId']==a[0]
    command('POINT','B');assert current['match']['serverId']==b[1] and current['match']['receiverId']==a[1]
    command('UNDO');assert current['match']['serverId']==b[1] and len(current['match']['rallies'])==2
+   beforePoint=copy.deepcopy(current['match'])
    command('POINT','A');assert current['match']['serverId']==a[1] and current['match']['receiverId']==b[0]
    command('SETUP',status=400,serving=setup)
    command('SETUP',serving=setup,remark='Correct umpire observation');command('UNDO');assert current['match']['serverId']==a[1]
+   command('SETUP',serving=setup,remark='Correct positions after point')
+   command('UNDO_POINT')
+   assert all(current['match'][k]==beforePoint[k] for k in ['scoreA','scoreB','serving','rallies','games'])
+   command('POINT','A')
    command('CARD',participantId=a[0],cardType='Y');command('SHUTTLE')
    for _ in range(2):command('CHALLENGE','A',outcome='U')
    command('CHALLENGE','A',status=400,outcome='U');command('CHALLENGE','A',outcome='S')
+   details=copy.deepcopy(current['match']['resultDetails'])
+   command('UNDO_POINT');assert current['match']['resultDetails']==details and current['match']['scoreA']==1
+   command('POINT','A')
    snapshot=copy.deepcopy(current['match']);stop();start();current=call('tablet/state',token=token);assert current['match']==snapshot
    newCode=pair(m,1,'O1',reason='Replace device')['code'];call('tablet/state',token=token);replacement=tablet(newCode,'Replacement tablet');call('tablet/state',status=401,token=token);token=replacement['token'];current=replacement['match'];assert current['match']['serving']==snapshot['serving'] and current['match']['rallies']==snapshot['rallies']
    command('PAPER',remark='Temporary paper scoring');call('tablet/state',status=401,token=token)
@@ -87,7 +98,7 @@ try:
    assert len(current['match']['games'])==2 and current['match']['scoreA']==0 and current['match']['scoreB']==0
    for _ in range(2):command('POINT','B')
    command('POINT','B');assert current['match']['serving']['leftSide']=='B' and current['match']['serving']['decidingEndsChanged']
-   command('UNDO');assert current['match']['serving']['leftSide']=='A' and not current['match']['serving']['decidingEndsChanged']
+   command('UNDO_POINT');assert current['match']['serving']['leftSide']=='A' and not current['match']['serving']['decidingEndsChanged']
    for _ in range(3):command('POINT','B')
    command('SUBMIT');assert current['match']['status']=='RC' and not current['match']['rallyHistoryComplete'] and len(current['match']['resumptions'])==2
    call('dashboard/confirm',{'revision':view()['revision'],'matchId':m['id'],'version':current['match']['version']})
@@ -100,12 +111,16 @@ $ErrorActionPreference='Stop'
 if($env:TLS_TEST_NAME -notmatch '^TLS_Test_[a-f0-9]{32}$'){throw 'Unsafe test database'}
 $cb=New-Object System.Data.SqlClient.SqlConnectionStringBuilder($env:TLS_TEST_BASE);$cb['Initial Catalog']=$env:TLS_TEST_NAME
 $cn=New-Object System.Data.SqlClient.SqlConnection($cb.ConnectionString);$cn.Open()
-try{$cmd=$cn.CreateCommand();$cmd.CommandText="UPDATE MatchLiveRecords SET Json=JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(Json,'$.state.serving',NULL),'$.state.rallies',NULL),'$.state.rallyHistoryComplete',NULL) WHERE MatchId=@id";[void]$cmd.Parameters.AddWithValue('@id',$env:TLS_TEST_MATCH);[void]$cmd.ExecuteNonQuery()}finally{$cn.Dispose()}
+try{$cmd=$cn.CreateCommand();$cmd.CommandText="UPDATE MatchLiveRecords SET Json=JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(Json,'$.state.serving',NULL),'$.state.rallies',NULL),'$.state.rallyHistoryComplete',NULL),'$.state.history[0].rallyCount',NULL) WHERE MatchId=@id";[void]$cmd.Parameters.AddWithValue('@id',$env:TLS_TEST_MATCH);[void]$cmd.ExecuteNonQuery()}finally{$cn.Dispose()}
 '''
    legacy=subprocess.run(['powershell','-NoProfile','-Command',script],env={**db.control,'TLS_TEST_MATCH':sm['id']},capture_output=True,text=True);assert legacy.returncode==0,'Legacy test preparation failed (credentials withheld).'
    current=call('tablet/state',token=token);assert current['match']['serving'] is None and not current['match']['rallyHistoryComplete']
    command('POINT','A',status=400);command('SETUP',serving={'serverSide':'A','serverId':a[0],'receiverId':b[0],'leftSide':'B'})
    command('POINT','A');assert current['match']['scoreA']==2 and len(current['match']['rallies'])==1 and not current['match']['rallyHistoryComplete']
+   command('UNDO_POINT');assert current['match']['scoreA']==1 and not current['match']['rallies'] and not current['match']['rallyHistoryComplete']
+   # The older pre-point snapshot has no rally count; score history still identifies it.
+   command('UNDO_POINT');assert current['match']['scoreA']==0 and not current['match']['canUndoPoint']
+   command('POINT','A');command('POINT','A')
    command('PAPER',remark='Device issue');assert current['match']['paperMode'];call('tablet/state',status=401,token=token)
    assert next(c for c in call('dashboard/')['courts'] if c['number']==2)['status']=='P'
    mutate('result',{'matchId':sm['id'],'matchVersion':current['match']['version'],'games':[{'a':5,'b':0},{'a':5,'b':0}],'finishedAt':datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None).isoformat()})

@@ -9,6 +9,7 @@ public static class SessionCourts
     public static int[] EligibleCourts(SetupData s,EventPlan plan,TournamentMatch m,DateTime now)
     {
         if(!m.Start.HasValue)return [];
+        if(m.Start.Value.Date==now.Date)return EventOperations.Courts(s,plan).Where(c=>!s.Venue.ClosedCourts.Contains(c)).ToArray();
         var sessions=EventOperations.Sessions(s,plan).ToList();
         var active=sessions.Where(w=>w.Date.ToDateTime(w.Start)<=now&&now<w.Date.ToDateTime(w.End)).ToList();
         // Future-day assignments are preparation only; START still checks the playing date.
@@ -20,7 +21,7 @@ public static class SessionCourts
     }
     public static void Authorize(SetupData s,EventPlan plan,TournamentMatch m,int court,string? reason)
     {
-        if(string.IsNullOrWhiteSpace(reason))return;
+        if(string.IsNullOrWhiteSpace(reason)||m.Start?.Date==LiveRuntime.LocalNow(s).Date)return;
         TournamentRules.Need(reason.Length<=300,"Court exception reason must be at most 300 characters.");
         var now=LiveRuntime.LocalNow(s);
         var active=EventOperations.Sessions(s,plan).Where(w=>w.Date.ToDateTime(w.Start)<=now&&now<w.Date.ToDateTime(w.End)).ToList();

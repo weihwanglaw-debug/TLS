@@ -2,7 +2,8 @@ import {capacityReply} from './schedule-capacity-fixture';
 import {cleanup,fireEvent,render,screen,within,waitFor} from '@testing-library/react';
 import {afterEach,beforeEach,expect,test,vi} from 'vitest';
 const service=vi.hoisted(()=>({api:vi.fn(),capacity:vi.fn()}));vi.mock('../src/api',()=>({api:(path:string,...args:any[])=>path==='scheduling/capacity'?service.capacity(args[1]):service.api(path,...args)}));
-import EventSchedule from '../src/EventSchedule';
+// Retained regression coverage for the legacy scheduling client during API compatibility.
+import {LegacyEventSchedule as EventSchedule} from '../src/EventSchedule';
 const view={revision:7,timeZone:'Asia/Singapore',eventInfo:{id:'event',name:'Event',startDate:'2026-11-01',endDate:'2026-11-02'},eventPlan:{dailySessions:[],scheduleDays:[],sessions:[{date:'2026-11-01',start:'10:00:00',end:'12:00:00'},{date:'2026-11-02',start:'14:00:00',end:'18:00:00'}],matchMinutes:30,restMinutes:20},eventCourts:[1,2,3,4],closedCourts:[],programs:[{id:'x',name:'Program X',status:'A'},{id:'y',name:'Program Y',status:'A'},{id:'z',name:'Program Z',status:'A'}],plans:[{programId:'x',phase:'K',lastRound:1,matches:[{id:'mx',programId:'x',status:'SC',games:[],phase:'K',round:1,roundLabel:'Semifinals',number:1,start:null,court:null}]},{programId:'y',phase:'K',lastRound:1,matches:[{id:'my',programId:'y',status:'SC',games:[],phase:'K',round:1,roundLabel:'Semifinals',number:2,start:null,court:null}]},{programId:'z',phase:'K',lastRound:1,matches:[{id:'mz',programId:'z',status:'SC',games:[],phase:'K',round:1,roundLabel:'Semifinals',number:3,start:'2026-11-02T14:00:00',court:1}]}]};
 
 
@@ -106,9 +107,9 @@ test('table shows both opponents, supports deselection and saves validated swaps
 });
 
 test('rejected swaps retain original slots and first selection; leaving the table clears selection',async()=>{
- const data=swapData();configureSwap(data,async()=>{throw new Error('Swap conflicts with player rest.');});const changed=await savedTable();
+ const data=swapData();configureSwap(data,async()=>{throw new Error('Swap conflicts with a player overlap.');});const changed=await savedTable();
  fireEvent.click(screen.getByRole('button',{name:'Select match #1 for swap'}));fireEvent.click(screen.getByRole('button',{name:'Swap match #1 with match #2'}));
- await screen.findByText('Swap conflicts with player rest.');fireEvent.click(screen.getByRole('button',{name:'OK'}));
+ await screen.findByText('Swap conflicts with a player overlap.');fireEvent.click(screen.getByRole('button',{name:'OK'}));
  expect(changed).not.toHaveBeenCalled();expect(screen.getByRole('button',{name:'Clear swap selection for match #1'}).getAttribute('aria-pressed')).toBe('true');
  expect(within(screen.getByText('#1').closest('tr')!).getByText('01/11/2026 · 10:00–10:30')).toBeTruthy();
  fireEvent.click(screen.getByRole('button',{name:'Back to Planning'}));fireEvent.click(screen.getByRole('button',{name:'View Saved Timetable'}));

@@ -76,10 +76,7 @@ try:
  call('tournament/event',{'revision':rev(),'plan':restricted},method='PUT')
  queued=next(m for m in matches() if m['court']==1)
  dashboard=call('dashboard/?eventId='+eid)
- check(next(q for q in dashboard['queue'] if q['match']['id']==queued['id'])['eligibleCourts']==[2])
- before_revision=rev()
- rejection=call('dashboard/pair',{'revision':before_revision,'matchId':queued['id'],'court':1,'umpireId':officials[0]['id'],'presetId':preset},status=400)
- check('Schedule' in rejection['message']);check(rev()==before_revision)
+ check(next(q for q in dashboard['queue'] if q['match']['id']==queued['id'])['eligibleCourts']==[1,2,3,4])
  invitation=pairing(queued,2,officials[0]['id'])
  check(invitation['match']['court']==2)
  # Restoring the planned allocation permits Court 1 without moving other matches.
@@ -96,16 +93,16 @@ try:
  body={'version':tablet['version'],'operationId':str(uuid.uuid4()),'action':'START','serving':setup,'confirmEarlyStart':True}
  started=call('tablet/command',body,token=token)['match'];check(started['status']=='IP');check(started['startedAt'] is not None)
  # Spectator display settings persist through the shared master settings API.
- display_config={'columns':4,'rows':4,'pageSeconds':7,'autoRotate':True,'eventId':eid,'courts':[1]}
+ display_config={'columns':4,'rows':4,'pageSeconds':7,'autoRotate':True,'eventId':'','courts':[]}
  call('setup/settings',{'revision':rev(),'timeZone':state()['timeZone'],'liveDisplay':display_config},method='PUT')
  check(state()['liveDisplay']==display_config)
  screen=call('display');check(screen['config']==display_config);check(len(screen['matches'])==1)
  shown=screen['matches'][0];check(shown['id']==m['id']);check(shown['nameA']==started['nameA']);check(shown['scoreA']==started['scoreA'])
  check(not any(key in json.dumps(screen).lower() for key in ['token','codehash','deviceip','umpirename','mobile','email']))
- for patch in [{'columns':0},{'rows':7},{'pageSeconds':2},{'courts':[1,1]},{'eventId':'missing-event'}]:
+ for patch in [{'columns':0},{'rows':7},{'pageSeconds':2}]:
   revision=rev();call('setup/settings',{'revision':revision,'timeZone':state()['timeZone'],'liveDisplay':{**display_config,**patch}},method='PUT',status=400);check(rev()==revision)
  call('setup/settings',{'revision':rev(),'timeZone':state()['timeZone'],'liveDisplay':{**display_config,'courts':[2]}},method='PUT')
- check(call('display')['matches']==[])
+ check(len(call('display')['matches'])==1);check(state()['liveDisplay']['courts']==[])
  check(started['plannedStart']==before[m['id']][0]);check(before=={m['id']:(m['start'],m['end']) for m in matches()})
  repeated=call('tablet/command',body,token=token)['match'];check(repeated['startedAt']==started['startedAt']);check(repeated['version']==started['version'])
  sheet=call('dashboard/scoresheet/'+m['id']);check(sheet['startedAt']==started['startedAt']);check(sheet['players']==started['players'])

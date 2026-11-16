@@ -27,7 +27,7 @@ public static class SessionAllocation
         }
         return result;
     }
-    public static bool Pending(SetupData s,TournamentMatch m)=>m.Status==MatchStatus.Scheduled&&!m.Start.HasValue&&!m.End.HasValue&&!m.Court.HasValue&&!s.Venue.Bindings.Any(b=>b.MatchId==m.Id);
+    public static bool Pending(SetupData s,TournamentMatch m)=>m.Status==MatchStatus.Scheduled&&!FixtureResets.StartedOrScored(m)&&!m.Start.HasValue&&!m.End.HasValue&&!m.Court.HasValue&&!s.Venue.Bindings.Any(b=>b.MatchId==m.Id);
     public static List<TournamentMatch> Allocate(SetupData s,EventPlan plan,List<PlayingSession> sessions,Dictionary<string,TournamentMatch> matches)
     {
         var added=new List<TournamentMatch>();var order=Order(s);
@@ -66,12 +66,34 @@ public static class SessionAllocation
         }
         return added;
     }
+    private static int[] Courts(EventPlan plan,PlayingSession session)=>session.Courts??plan.ScheduleDays.FirstOrDefault(d=>d.Date==session.Date)?.Courts??plan.Courts;
+    public static int? Capacity(EventPlan plan,PlayingSession session)=>
+        plan.MatchMinutes is <1 or >360||session.Start>=session.End?null:
+        Courts(plan,session).Distinct().Count()*(int)((session.End-session.Start).TotalMinutes/plan.MatchMinutes);
+    public static int? Available(SetupData s,EventPlan plan,PlayingSession session,string[]? moves=null)
+    {
+        if(Capacity(plan,session) is not int)return null;
+        var start=session.Date.ToDateTime(session.Start);var end=session.Date.ToDateTime(session.End);var slots=0;
+        foreach(var court in Courts(plan,session).Distinct())
+        {
+            var cursor=start;
+            var booked=TournamentScheduler.Matches(s).Where(m=>m.Status!=MatchStatus.Bye&&m.Court==court&&m.Start.HasValue&&m.End.HasValue&&m.Start<end&&m.End>start&&!(moves??[]).Contains(m.Id)).OrderBy(m=>m.Start);
+            foreach(var m in booked)
+            {
+                var next=m.Start!.Value>start?m.Start.Value:start;
+                if(next>cursor)slots+=(int)((next-cursor).TotalMinutes/plan.MatchMinutes);
+                if(m.End!.Value>cursor)cursor=m.End.Value;
+            }
+            if(cursor<end)slots+=(int)((end-cursor).TotalMinutes/plan.MatchMinutes);
+        }
+        return slots;
+    }
     public static List<SessionAllocationSummary> Summary(EventPlan plan,List<TournamentMatch> added)=>plan.Sessions.Select((w,i)=>
     {
         var placed=added.Where(m=>m.Start>=w.Date.ToDateTime(w.Start)&&m.End<=w.Date.ToDateTime(w.End)&&(w.Courts?.Contains(m.Court??0)??true)).ToList();
         var requested=w.ProgramLimits??placed.GroupBy(m=>m.ProgramId).ToDictionary(g=>g.Key,g=>g.Count());
         var programs=requested.Keys.Union(placed.Select(m=>m.ProgramId)).Select(id=>new ProgramAllocation(id,requested.GetValueOrDefault(id),placed.Count(m=>m.ProgramId==id))).ToList();
-        var capacity=placed.Count;
+        var capacity=Capacity(plan,w)??0;
         return new SessionAllocationSummary(i,w.Date,w.Start,w.End,capacity,programs);
     }).ToList();
 }
@@ -79,7 +101,7 @@ public static class SessionAllocation
 
 public sealed record ScheduleCalculationResult(EventPlan Plan,List<TournamentMatch> Matches,List<UnslottedMatch> Unplaced,int Kept);
 public sealed record ProgramCapacity(string ProgramId,int Requested,int Scheduled,int Maximum);
-public sealed record SessionCapacity(int Index,DateOnly Date,TimeOnly Start,TimeOnly End,int Capacity,List<ProgramCapacity> Programs);
+public sealed record SessionCapacity(int Index,DateOnly Date,TimeOnly Start,TimeOnly End,int? Capacity,List<ProgramCapacity> Programs,int? Available=null,string? Issue=null);
 
 public static class ScheduleCalculation
 {
@@ -106,7 +128,7 @@ public static class ScheduleCalculation
                 if(moving)
                 {
                     TournamentRules.Need(whole.All(m=>moves.Contains(m.Id))&&stage.Select(x=>x.Date).Distinct().Count()==1,"Move the entire round to one date.");
-                    TournamentRules.Need(whole.All(m=>m.Status==MatchStatus.Scheduled&&m.Games.Count==0&&m.ActualStartedAt is null&&(m.Live?.Corrections.Count??0)==0&&!s.Venue.Bindings.Any(b=>b.MatchId==m.Id)),"Only an entirely unplayed, unpaired round can be moved.");
+                    TournamentRules.Need(whole.All(m=>m.Status==MatchStatus.Scheduled&&!FixtureResets.StartedOrScored(m)&&!s.Venue.Bindings.Any(b=>b.MatchId==m.Id)),"Only an entirely unplayed, unpaired round can be moved.");
                 }
 
             }
@@ -145,13 +167,13 @@ public static class ScheduleCalculation
                     TournamentRules.Need(sessions.SelectMany(w=>w.Courts!).ToHashSet().SetEquals(day.Courts),"Day courts must match the selected session courts.");
                 }
             }
-            plan.DailySessions=[];plan.Sessions=request.Sessions;plan.MatchMinutes=request.MatchMinutes;plan.RestMinutes=request.RestMinutes;plan.ScheduleDays=request.Days;
+            plan.DailySessions=[];plan.Sessions=request.Sessions;plan.MatchMinutes=request.MatchMinutes;plan.RestMinutes=0;plan.ScheduleDays=request.Days;
             TournamentRules.ValidateEvent(s,plan);TournamentRules.Save(s.EventPlans,plan,p=>p.EventId);
             var additions=new List<TournamentMatch>();var unplaced=new List<UnslottedMatch>();var kept=request.Days.SelectMany(d=>d.MatchIds).Distinct().Select(id=>matches[id]).Count(m=>m.Status!=MatchStatus.Bye&&!SessionAllocation.Pending(s,m));
             if(request.Sessions.Any(w=>w.ProgramLimits is not null))
             {
                 additions=SessionAllocation.Allocate(s,plan,request.Sessions,matches);
-                unplaced=ids.Distinct().Select(id=>matches[id]).Where(m=>m.Status!=MatchStatus.Bye&&SessionAllocation.Pending(s,m)).Select(m=>new UnslottedMatch(m.Id,m.Number,m.ProgramId,"Remaining after selected quantities, session capacity and player rest.")).ToList();
+                unplaced=ids.Distinct().Select(id=>matches[id]).Where(m=>m.Status!=MatchStatus.Bye&&SessionAllocation.Pending(s,m)).Select(m=>new UnslottedMatch(m.Id,m.Number,m.ProgramId,"Remaining after selected quantities, session capacity and player overlaps.")).ToList();
             }
             else
             {
@@ -159,7 +181,7 @@ public static class ScheduleCalculation
             foreach(var match in day.MatchIds.Select(id=>matches[id]).OrderBy(m=>m.Phase=="G"?0:m.Round).ThenBy(m=>m.Number))
             {
                 if(match.Status==MatchStatus.Bye)continue;
-                if(match.Status!=MatchStatus.Scheduled||match.Start.HasValue||match.Court.HasValue||s.Venue.Bindings.Any(b=>b.MatchId==match.Id)){continue;}
+                if(!SessionAllocation.Pending(s,match)){continue;}
                 var window=new EventPlan{EventId=plan.EventId,Sessions=plan.Sessions.Where(w=>w.Date==day.Date).ToList(),Courts=day.Courts,CourtsConfigured=true,MatchMinutes=plan.MatchMinutes,RestMinutes=plan.RestMinutes};
                 try
                 {
@@ -170,7 +192,7 @@ public static class ScheduleCalculation
                     additions.Add(match);
                 }
                 catch(RuleException e)when(e.Message.StartsWith("Cannot fit match",StringComparison.Ordinal))
-                {unplaced.Add(new(match.Id,match.Number,match.ProgramId,"No space on "+day.Date.ToString("yyyy-MM-dd")+" within the selected sessions, courts and player rest."));}
+                {unplaced.Add(new(match.Id,match.Number,match.ProgramId,"No space on "+day.Date.ToString("yyyy-MM-dd")+" within the selected sessions, courts and player overlaps."));}
             }
             }
             unplaced=unplaced.GroupBy(m=>m.Id).Select(g=>g.First()).Where(m=>SessionAllocation.Pending(s,matches[m.Id])).ToList();
@@ -188,44 +210,14 @@ public static class ScheduleCalculation
     }
 
     public static List<ScheduleDay> Days(List<PlayingSession> sessions)=>sessions.GroupBy(w=>w.Date).OrderBy(g=>g.Key).Select(g=>new ScheduleDay(g.Key,g.SelectMany(w=>w.Courts??[]).Distinct().ToArray(),g.SelectMany(w=>w.MatchIds??[]).Distinct().ToArray())).ToList();
-    private static SetupData Copy(SetupData s)=>System.Text.Json.JsonSerializer.Deserialize<SetupData>(System.Text.Json.JsonSerializer.Serialize(s,JsonDefaults.Options),JsonDefaults.Options)!;
     public static object Capacity(SetupData s,SchedulePreviewRequest request)
     {
-        var actual=Calculate(Copy(s),request);
-        var actualSummary=SessionAllocation.Summary(actual.Plan,actual.Matches);
-        var candidates=TournamentScheduler.Matches(s).Where(m=>SessionAllocation.Pending(s,m)&&s.Programs.Any(p=>p.Id==m.ProgramId&&p.EventId==request.EventId&&p.Status=="A")).GroupBy(m=>m.ProgramId).ToDictionary(g=>g.Key,g=>g.Select(m=>m.Id).ToArray());
-        var result=new List<SessionCapacity>();
-        foreach(var (target,index) in request.Sessions.Select((w,i)=>(w,i)))
-        {
-            var selected=target.ProgramLimits?.Keys.ToHashSet()??(target.MatchIds??[]).Where(id=>candidates.Values.Any(ids=>ids.Contains(id))).Select(id=>s.ProgramPlans.Single(p=>p.Matches.Any(m=>m.Id==id)).ProgramId).ToHashSet();
-            if(selected.Count==0)selected=candidates.Keys.ToHashSet();
-            int Allowance(string pid)=>Math.Max(0,candidates.GetValueOrDefault(pid,[]).Length-request.Sessions.Where((_,i)=>i!=index).Sum(w=>w.ProgramLimits?.GetValueOrDefault(pid)??0));
-            var trials=new Dictionary<string,List<TournamentMatch>>();
-            List<TournamentMatch> Trial(Dictionary<string,int> limits)
-            {
-                var key=System.Text.Json.JsonSerializer.Serialize(limits.OrderBy(x=>x.Key));
-                if(trials.TryGetValue(key,out var cached))return cached;
-                var windows=request.Sessions.Select((w,i)=>
-                {
-                    if(i==index)return w with{MatchIds=(w.MatchIds??[]).Concat(limits.Keys.SelectMany(pid=>candidates.GetValueOrDefault(pid,[]))).Distinct().ToArray(),ProgramLimits=limits};
-                    if(w.Date>target.Date||w.Date==target.Date&&w.Start>target.Start)return w with{ProgramLimits=w.ProgramLimits?.ToDictionary(x=>x.Key,_=>0)};
-                    return w;
-                }).ToList();
-                var trial=Calculate(Copy(s),request with{Sessions=windows,Days=Days(windows)});
-                var placed=trial.Matches.Where(m=>m.Start>=target.Date.ToDateTime(target.Start)&&m.End<=target.Date.ToDateTime(target.End)&&(target.Courts?.Contains(m.Court??0)??true)).ToList();
-                trials[key]=placed;return placed;
-            }
-            var placed=Trial(selected.ToDictionary(pid=>pid,Allowance));
-            var programs=new List<ProgramCapacity>();
-            foreach(var pid in candidates.Keys.Union(actualSummary[index].Programs.Select(p=>p.ProgramId)))
-            {
-                var limits=(target.ProgramLimits??new()).ToDictionary(x=>x.Key,x=>x.Value);limits[pid]=Allowance(pid);
-                var maximum=Trial(limits).Count(m=>m.ProgramId==pid);
-                var current=actualSummary[index].Programs.SingleOrDefault(p=>p.ProgramId==pid);
-                programs.Add(new(pid,current?.Requested??0,current?.Scheduled??0,Math.Max(maximum,current?.Scheduled??0)));
-            }
-            result.Add(new(index,target.Date,target.Start,target.End,Math.Max(placed.Count,actualSummary[index].Capacity),programs));
-        }
-        return new{revision=s.Revision,sessions=result,matches=actual.Matches,unplaced=actual.Unplaced,kept=actual.Kept};
+        SetupStore.CheckRevision(s,request.Revision);
+        TournamentRules.Need(s.Events.Any(e=>e.Id==request.EventId),"Event not found.");
+        TournamentRules.Need(request.Sessions is {Count:<=10000}&&request.Sessions.All(w=>w is not null),"Provide valid session records.");
+        var plan=new EventPlan{EventId=request.EventId,MatchMinutes=request.MatchMinutes,ScheduleDays=request.Days??[],Courts=EventOperations.Courts(s,TournamentRules.Event(s,request.EventId))};
+        var sessions=request.Sessions.Select((w,i)=>new SessionCapacity(i,w.Date,w.Start,w.End,SessionAllocation.Capacity(plan,w),[],SessionAllocation.Available(s,plan,w,request.MoveMatchIds),request.MatchMinutes is <1 or >360?"Set an estimated match duration between 1 and 360 minutes.":w.Start>=w.End?"End time must be later than start time.":null)).ToList();
+        // Compatibility fields remain empty: capacity does not place matches.
+        return new{revision=s.Revision,sessions,matches=Array.Empty<TournamentMatch>(),unplaced=Array.Empty<UnslottedMatch>(),kept=0};
     }
 }

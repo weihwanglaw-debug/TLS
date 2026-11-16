@@ -1,3 +1,7 @@
+# Scheduling update — 16 November 2026
+
+Schedule now uses the [whole-tournament planner](TOURNAMENT_SCHEDULE_PLANNER.md). Future rounds are planning references until normal confirmed-result progression generates actual matches. Estimates are per program/round; the event-wide Match Timing input is removed. Planned times do not auto-shift when play runs late.
+
 # Fixture and Result — TRS adaptation
 
 TLS uses the existing TRS fixture configuration, bracket, standings, table, result dialog, printing and CSV presentation. Components were copied into TLS and adapted to its SQL-backed participant and match records. TRS registration, payment and database dependencies were not copied. TRS itself was not changed.
@@ -32,8 +36,8 @@ The tablet can record these details when enabled in its match rules. Recording a
 - A playing tablet match must be switched to paper through Dashboard before manual result entry. Switching revokes the tablet session and keeps its court occupied until reconciliation.
 - Manual saves use both the catalog revision and the match version. A newer tablet update cannot be overwritten by an older result dialog.
 - An unchanged tablet submission can be confirmed without a correction reason. Changes to its final scores, details or recorded finish require a reason. The tablet's actual start is preserved exactly.
-- Results cannot be amended/cleared while a dependent round exists. A completed result can be cleared with a reason; its prior record remains in correction/audit history.
-- The latest knockout round can be reset only when entirely unplayed and without waiting tablet assignments. Earlier completed rounds remain intact. The existing whole-draw reset remains limited to unplayed draws.
+- Results cannot be amended/cleared while a dependent round exists. A completed result can be cleared with a reason; its prior record remains in correction/audit history. Once cleared, historical corrections alone do not block Reset Schedule, Reset Draw or Reset Latest Round. Reset eligibility uses the current match status, start/finish timestamps and recorded games. Active play, current results and waiting tablet assignments remain protected. Reset Schedule still comes before draw/round reset. Resetting a schedule preserves correction history; subsequent draw removal is captured by the existing audit log.
+- The latest knockout round can be reset only when entirely unplayed and without waiting tablet assignments. Earlier completed rounds remain intact. The existing whole-draw reset also allows draws whose results have all been cleared and whose current play state and tablet assignments have been released.
 - Changing result presentation does not replace local fixture IDs or imported source IDs.
 
 ## TRS integration without packaged examples
@@ -72,8 +76,31 @@ Final verification: normal frontend/backend builds passed with no backend warnin
 
 ## Preset selection and revised preparation
 
-Event Details holds officials, with date editing allowed only before saved fixtures. Court selection belongs to Schedule and uses the master venue courts. Dated sessions, duration/rest and generated-round allocations belong to Schedule Event under Fixture and Result; draw preview/save does not allocate slots. Round progression is always specific to the program; see SCHEDULING.md. Fixture configuration and preview are separate TRS-derived screens; entry-side swaps are supported for initial knockout/group draws and Back preserves selections. Confirm is the only operation that saves the draft seeds/configuration/fixtures. Create a game preset independently, then select it before tablet code issuance or first manual result. Editing/deactivating the master preset cannot alter frozen match rules. See TOURNAMENT.md and EVENT_WORKFLOW_TEST_CASES.md for progression, API details and rollback.
+Event Details holds officials, with date editing allowed only before saved fixtures. Court selection belongs to Schedule and uses the master venue courts. Dated sessions and generated-round allocations belong to Schedule Event under Fixture and Result; draw preview/save does not allocate slots. Round progression is always specific to the program; see SCHEDULING.md. Fixture configuration and preview are separate TRS-derived screens; entry-side swaps are supported for initial knockout/group draws and Back preserves selections. Confirm is the only operation that saves the draft seeds/configuration/fixtures. Create a game preset independently, then select it before tablet code issuance or first manual result. Editing/deactivating the master preset cannot alter frozen match rules. See TOURNAMENT.md and EVENT_WORKFLOW_TEST_CASES.md for progression, API details and rollback.
 
 Review availability is selected on an individual match assignment rather than in Event Details. Event Programs are the final section; on/off choices and action feedback reuse TRS toggles and modal dialogs. Manual/paper changes mark the rally history incomplete when it no longer describes the final games.
 
 For the shared four-step header, saved draw list, default Table View, preset defaults and required default presets and per-match scoring protection, see [Guided fixture planning](FIXTURE_PLANNING.md).
+
+Session capacity now uses fixed court-time slots, with estimated duration in Event Details. Minimum player rest is managed by admins; actual overlaps remain blocked. See the 5 November 2026 policy in SCHEDULING.md.
+
+
+## Reset lifecycle update - 6 November 2026
+
+[Reset lifecycle](RESET_LIFECYCLE.md) is authoritative for result/schedule clearing, history-independent eligibility, dependent-round and draft cleanup, device recovery, same-day operation and result-delivery retries. It supersedes conflicting historical descriptions above.
+
+
+## Table ordering - 6 November 2026
+
+Table View orders matches within each group or selected round by scheduled date and start time, earliest first. Matches missing a date or start time appear last. Equal start times and unscheduled matches retain their draw order. Group order and bracket pairings remain unchanged. Printed Table View and selected-round CSV export follow the displayed order.
+
+
+## Audience print layout - 6 November 2026
+
+Print / Save PDF from Table View generates a dedicated audience schedule from the selected group stage or knockout round. It does not clone editable admin controls. Program headings are followed by date sections, with matches ordered chronologically across groups and columns Time, Court, Group / Round, Match and Score. Group names use the configured display names. Seeds appear as compact inline labels beside competitors, with doubles names kept together in balanced matchup columns.
+
+Courts, dates and times are plain text, including when the screen uses edit buttons. Unscheduled dates appear under Awaiting scheduling; missing times display To be scheduled and missing courts display TBC. Public scores/outcome labels are included without private remarks, officials, progress counters or action columns.
+
+The A4 landscape print stylesheet repeats the date and column headings on continuation pages and avoids splitting a match row. The Bracket View print path remains separate. Export CSV and the on-screen admin table keep their existing behavior.
+
+Verification: seven focused print/ordering tests and the frontend production build passed. The live 24-match event was rendered to a two-page A4 PDF and both page images inspected; court/date data, compact seeds and repeated headings were present with no cell overflow. QA files were generated outside the repository. No API or database changes.

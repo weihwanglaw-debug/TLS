@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 namespace LiveScore.Api;
 
 public sealed record SchedulePreviewRequest(long Revision,string EventId,List<PlayingSession> Sessions,int MatchMinutes,int RestMinutes,List<ScheduleDay> Days,string[]? MoveMatchIds=null);
-public sealed record SessionValidationRequest(long Revision,string EventId,List<PlayingSession> Sessions,int? SessionIndex=null);
+public sealed record SessionValidationRequest(long Revision,string EventId,List<PlayingSession> Sessions,int? SessionIndex=null,int[]? DirtySessions=null);
 public sealed record ScheduleDraftRequest(long Revision,string EventId,List<PlayingSession> Sessions,int SessionIndex,int[] DirtySessions,string[] MoveMatchIds);
 public sealed record PlanningDraft(List<PlayingSession> Sessions,int[] DirtySessions,string[] MoveMatchIds,DateTimeOffset SavedAt);
 public static class ScheduleEndpoints
@@ -11,6 +11,7 @@ public static class ScheduleEndpoints
     private static readonly ConcurrentDictionary<string,Preview> Previews=new();
     public static void Map(WebApplication app)
     {
+        SchedulePlannerEndpoints.Map(app);
         var group=app.MapGroup("/api/scheduling");
         group.AddEndpointFilter(async(c,next)=>LiveAccess.LocalAdmin(c.HttpContext)?await next(c):Results.StatusCode(403));
         group.MapPost("/validate-session",(SessionValidationRequest request,SetupStore store)=>
@@ -25,8 +26,8 @@ public static class ScheduleEndpoints
             var saved=store.Change(request.Revision,"SCHEDULE_DRAFT",s=>
             {
                 TournamentRules.Need(s.Events.Any(e=>e.Id==request.EventId),"Event not found.");
-                ValidateSession(s,new(request.Revision,request.EventId,request.Sessions,request.SessionIndex));
-                TournamentRules.Need(request.DirtySessions.All(i=>i>=0&&i<request.Sessions.Count),"Invalid unfinished session.");
+                TournamentRules.Need(request.DirtySessions is not null&&request.DirtySessions.All(i=>i>=0&&i<request.Sessions.Count&&i!=request.SessionIndex),"Invalid unfinished session.");
+                ValidateSession(s,new(request.Revision,request.EventId,request.Sessions,request.SessionIndex,request.DirtySessions));
                 var eventMatches=TournamentScheduler.Matches(s).Where(m=>s.Programs.Any(p=>p.Id==m.ProgramId&&p.EventId==request.EventId)).Select(m=>m.Id).ToHashSet();
                 TournamentRules.Need(request.MoveMatchIds.All(eventMatches.Contains),"Choose matches belonging to this event.");
                 TournamentRules.Event(s,request.EventId).PlanningDraft=new(request.Sessions,request.DirtySessions,request.MoveMatchIds,DateTimeOffset.UtcNow);
@@ -87,7 +88,7 @@ public static class ScheduleEndpoints
                     {
                         var actual=TournamentScheduler.Matches(s).SingleOrDefault(m=>m.Id==proposed.Id);
                         var moving=preview.Moves.Contains(proposed.Id);
-                        TournamentRules.Need(actual is not null&&actual.Status==MatchStatus.Scheduled&&(moving||!actual.Start.HasValue&&!actual.Court.HasValue)&&actual.ActualStartedAt is null&&(actual.Live?.Corrections.Count??0)==0&&!s.Venue.Bindings.Any(b=>b.MatchId==actual.Id),"A selected match changed. Preview the schedule again.");
+                        TournamentRules.Need(actual is not null&&actual.Status==MatchStatus.Scheduled&&(moving||!actual.Start.HasValue&&!actual.Court.HasValue)&&!FixtureResets.StartedOrScored(actual)&&!s.Venue.Bindings.Any(b=>b.MatchId==actual.Id),"A selected match changed. Preview the schedule again.");
                         actual.ReviewAvailable=actual.Court==proposed.Court&&actual.ReviewAvailable;actual.Start=proposed.Start;actual.End=proposed.End;actual.Court=proposed.Court;actual.DurationMinutes=proposed.DurationMinutes;
                     }
                     foreach(var proposed in preview.Matches)TournamentScheduler.ValidateOverride(s,TournamentScheduler.Matches(s).Single(m=>m.Id==proposed.Id));
@@ -100,33 +101,47 @@ public static class ScheduleEndpoints
 
     private static void ValidateSession(SetupData s,SessionValidationRequest request)
     {
-            // Scheduling simulates allocations in memory. Never apply that simulation to a saved draft.
-            var live=TournamentScheduler.Matches(s).ToDictionary(m=>m.Id,m=>m.Live);
-            s=System.Text.Json.JsonSerializer.Deserialize<SetupData>(System.Text.Json.JsonSerializer.Serialize(s,JsonDefaults.Options),JsonDefaults.Options)!;
-            foreach(var m in TournamentScheduler.Matches(s))m.Live=live.GetValueOrDefault(m.Id);
+            TournamentRules.Need(request.Sessions is {Count:>0 and <=10000}&&request.Sessions.All(w=>w is not null),"Add valid dated sessions.");
+            var dirty=request.DirtySessions??[];
+            TournamentRules.Need(dirty.All(i=>i>=0&&i<request.Sessions.Count&&i!=request.SessionIndex),"Invalid unfinished session.");
+            if(request.SessionIndex is int chosen)TournamentRules.Need(chosen>=0&&chosen<request.Sessions.Count,"Choose a valid session to save.");
             var original=TournamentRules.Event(s,request.EventId);
-            ScheduleCalculation.ValidateSessionStarts(s,original,request.Sessions);
             var plan=System.Text.Json.JsonSerializer.Deserialize<EventPlan>(System.Text.Json.JsonSerializer.Serialize(original,JsonDefaults.Options),JsonDefaults.Options)!;
-            plan.DailySessions=[];plan.Sessions=request.Sessions;
-            TournamentRules.ValidateEvent(s,plan);
-            if(request.SessionIndex is int index)
+            var ready=request.Sessions.Where((_,i)=>!dirty.Contains(i)).ToList();
+            var targets=request.SessionIndex is int target?new List<PlayingSession>{request.Sessions[target]}:ready;
+            ScheduleCalculation.ValidateSessionStarts(s,original,targets);
+            // Unfinished cards do not validate or replace published sessions yet.
+            var published=EventOperations.Sessions(s,original);
+            var booked=TournamentScheduler.Matches(s).Where(m=>m.Start.HasValue&&m.End.HasValue).ToList();
+            plan.DailySessions=[];plan.Sessions=[];
+            foreach(var (w,i) in request.Sessions.Select((w,i)=>(w,i)))
             {
-                TournamentRules.Need(index>=0&&index<request.Sessions.Count,"Choose a valid session to save.");
-                var w=request.Sessions[index];
-                var matches=TournamentScheduler.Matches(s).Where(m=>s.Programs.Any(p=>p.EventId==request.EventId&&p.Id==m.ProgramId)).ToDictionary(m=>m.Id);
-                TournamentRules.Need(w.MatchIds is {Length:>0}&&w.MatchIds.All(id=>matches.ContainsKey(id)),"Select at least one program and match quantity for this session.");
+                if(!dirty.Contains(i)){plan.Sessions.Add(w);continue;}
+                var position=request.Sessions.Take(i).Count(before=>before.Date==w.Date);
+                var old=published.Where(old=>old.Date==w.Date).Skip(position).FirstOrDefault();
+                if(old is not null&&booked.Any(m=>m.Start>=old.Date.ToDateTime(old.Start)&&m.End<=old.Date.ToDateTime(old.End)&&TournamentRules.SessionAllows(old,m)))plan.Sessions.Add(old);
+            }
+            TournamentRules.ValidateEvent(s,plan);
+            var matches=TournamentScheduler.Matches(s).Where(m=>s.Programs.Any(p=>p.EventId==request.EventId&&p.Id==m.ProgramId)).ToDictionary(m=>m.Id);
+            foreach(var w in targets)
+            {
+                TournamentRules.Need(w.MatchIds is not null&&w.MatchIds.All(matches.ContainsKey),"Choose matches belonging to this event.");
                 TournamentRules.Need(w.Courts is {Length:>0}&&!w.Courts.Any(c=>s.Venue.ClosedCourts.Contains(c)),"Select open courts for this session.");
                 if(w.ProgramLimits is not null)
-                    TournamentRules.Need(w.ProgramLimits.All(x=>x.Value<=w.MatchIds.Count(id=>matches[id].ProgramId==x.Key&&SessionAllocation.Pending(s,matches[id]))),"Session quantities cannot exceed the remaining selected matches for each program.");
-                var hasSaved=w.MatchIds.Any(id=>matches[id].Start.HasValue&&matches[id].Start>=w.Date.ToDateTime(w.Start)&&matches[id].End<=w.Date.ToDateTime(w.End)&&(w.Courts?.Contains(matches[id].Court??0)??true));
-                var hasRequested=w.ProgramLimits?.Any(x=>x.Value>0&&w.MatchIds.Any(id=>matches[id].ProgramId==x.Key&&SessionAllocation.Pending(s,matches[id])))??false;
-                TournamentRules.Need(hasSaved||hasRequested,"Select at least one program and match quantity for this session.");
+                    TournamentRules.Need(w.ProgramLimits.All(x=>x.Value>=0&&x.Value<=w.MatchIds.Count(id=>matches[id].ProgramId==x.Key&&SessionAllocation.Pending(s,matches[id]))),"Session quantities cannot exceed the remaining selected matches for each program.");
+                var requested=w.ProgramLimits?.Values.Sum()??0;
+                var available=SessionAllocation.Available(s,plan,w)??0;
+                TournamentRules.Need(requested<=available,$"This session has space for {available} additional matches. Reduce the quantities or adjust the session settings.");
+                if(request.SessionIndex.HasValue)
+                {
+                    var hasSaved=w.MatchIds.Any(id=>matches[id].Start.HasValue&&matches[id].Start>=w.Date.ToDateTime(w.Start)&&matches[id].End<=w.Date.ToDateTime(w.End)&&w.Courts.Contains(matches[id].Court??0));
+                    TournamentRules.Need(hasSaved||requested>0,"Select at least one program and match quantity for this session.");
+                }
             }
-            var calculated=ScheduleCalculation.Calculate(s,new(request.Revision,request.EventId,request.Sessions,plan.MatchMinutes,plan.RestMinutes,ScheduleCalculation.Days(request.Sessions)));
-            if(request.SessionIndex is int target)
+            foreach(var pid in targets.SelectMany(w=>w.ProgramLimits?.Keys??Enumerable.Empty<string>()).Distinct())
             {
-                var summary=SessionAllocation.Summary(calculated.Plan,calculated.Matches)[target];
-                TournamentRules.Need(summary.Programs.All(p=>p.Scheduled>=p.Requested),$"Only {summary.Programs.Sum(p=>p.Scheduled)} of {summary.Programs.Sum(p=>p.Requested)} requested matches fit this session. Adjust the quantities or session settings.");
+                var requested=ready.Sum(w=>w.ProgramLimits?.GetValueOrDefault(pid)??0);
+                TournamentRules.Need(requested<=matches.Values.Count(m=>m.ProgramId==pid&&SessionAllocation.Pending(s,m)),"Requested quantities exceed the remaining matches for this program across saved sessions.");
             }
     }
 

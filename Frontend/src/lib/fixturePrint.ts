@@ -1,7 +1,35 @@
 import type React from 'react';
+import type {MatchEntry} from '../types/config';
+import {getEntryDisplay} from './entryDisplay';
 import {venueTime} from '../live-types';
 const formatConfiguredDateTime=(date:Date,timeZone='Asia/Singapore',_format?:string)=>venueTime(date.toISOString(),timeZone);
 const escape=(value:string)=>value.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
+export function audienceScheduleHtml(program:string,matches:MatchEntry[],groups:Record<string,string>={}) {
+  const ordered=[...matches].sort((a,b)=>{
+    const date=(a.matchDate||'9999').localeCompare(b.matchDate||'9999');
+    return date||(a.startTime||'99:99').padEnd(8,':00').localeCompare((b.startTime||'99:99').padEnd(8,':00'));
+  });
+  const days=new Map<string,MatchEntry[]>();
+  for(const match of ordered){const rows=days.get(match.matchDate)||[];rows.push(match);days.set(match.matchDate,rows);}
+  const team=(entry:MatchEntry['team1'])=>`${entry.seed!=null?'<span class="schedule-seed">'+escape(String(entry.seed))+'</span> ':''}${escape(getEntryDisplay(entry,'compact').main||'To be confirmed')}`;
+  const score=(m:MatchEntry)=>{
+    if(m.status==='BY'||m.team1.label==='BYE'||m.team2.label==='BYE')return 'BYE';
+    if(m.walkover||m.status==='WO')return 'Walkover';
+    const games=m.games.filter(g=>g.p1!==''&&g.p2!=='').map(g=>escape(g.p1)+' - '+escape(g.p2)).join('<br>');
+    const outcome=({R:'Retirement',D:'Disqualification',M:'Admin decision'} as Record<string,string>)[m.resultKind||''];
+    return (games||'&mdash;')+(outcome?'<span class="schedule-outcome">'+outcome+'</span>':'');
+  };
+  return `<section class="audience-schedule"><h2 class="schedule-program">${escape(program)}</h2>${[...days].map(([date,rows])=>{
+    const title=date?new Intl.DateTimeFormat('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric',timeZone:'UTC'}).format(new Date(date+'T00:00:00Z')):'Awaiting scheduling';
+    return `<table class="schedule-table"><colgroup><col style="width:13%"><col style="width:8%"><col style="width:15%"><col style="width:52%"><col style="width:12%"></colgroup><thead><tr class="schedule-date"><th colspan="5">${escape(title)}</th></tr><tr><th>Time</th><th>Court</th><th>Group / Round</th><th>Match</th><th>Score</th></tr></thead><tbody>${rows.map((m,i)=>{
+      const time=m.startTime?escape(m.startTime.slice(0,5))+(m.endTime?' - '+escape(m.endTime.slice(0,5)):''):'To be scheduled';
+      const stage=m.groupId?(groups[m.groupId]||m.roundLabel||'Group '+m.groupId):m.roundLabel||'Round '+m.round;
+      const start=i===0||m.startTime!==rows[i-1].startTime;
+      return `<tr${start?' class="schedule-slot"':''}><td class="schedule-time">${time}</td><td class="schedule-court">${m.courtNo?escape(m.courtNo):'TBC'}</td><td>${escape(stage)}</td><td class="schedule-match"><span class="schedule-pair"><span class="schedule-team">${team(m.team1)}</span><span class="schedule-vs">vs</span><span class="schedule-team">${team(m.team2)}</span></span></td><td class="schedule-score">${score(m)}</td></tr>`;
+    }).join('')}</tbody></table>`;
+  }).join('')}</section>`;
+}
+
 function resolveCssVars(el: Element): void {
   const computed = window.getComputedStyle(document.documentElement);
   const resolve  = (val: string) =>
@@ -121,6 +149,27 @@ function openPrintWindow(
   .seed-badge { background: #1E3A5F; color: white; font-size: 9px; font-weight: 700;
     padding: 1px 4px; margin-right: 3px; display: inline-block; }
 
+  /* Audience schedule: standalone rules, independent of application utility CSS. */
+  .audience-schedule { margin-bottom: 24px; }
+  .schedule-program { font-size: 17px; color: #1e3a5f; margin: 0 0 14px; }
+  .schedule-table { table-layout: fixed; margin: 0 0 20px; border: 1px solid #bcc8d5; font-size: 12px; }
+  .schedule-table th { padding: 8px 10px; font-size: 10px; letter-spacing: .04em; text-transform: uppercase; }
+  .schedule-table .schedule-date th { background: #eaf0f6; color: #1e3a5f; font-size: 13px; letter-spacing: .02em; padding: 11px 10px; border-bottom: 1px solid #bcc8d5; }
+  .schedule-table td { padding: 10px; vertical-align: middle; line-height: 1.45; overflow-wrap: anywhere; }
+  .schedule-table tr.schedule-slot td { border-top: 2px solid #b6c5d5; }
+  .schedule-time { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .schedule-court { text-align: center; font-weight: 700; font-size: 15px; }
+  .schedule-match { font-size: 12px; }
+  .schedule-pair { display: grid; grid-template-columns: minmax(0,1fr) 18px minmax(0,1fr); align-items: center; gap: 8px; }
+  .schedule-team { display: block; }
+  .schedule-vs { display: inline; color: #65768a; font-size: 10px; text-align: center; }
+  .schedule-seed { display: inline-block; vertical-align: baseline; border: 1px solid #9bafc3; border-radius: 3px; color: #1e3a5f; font-size: 9px; font-weight: 700; padding: 0 4px; white-space: nowrap; }
+  .schedule-score { text-align: center; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .schedule-outcome { display: block; font-weight: 400; font-size: 10px; }
+  .schedule-table thead { display: table-header-group; }
+  .schedule-table tr { break-inside: avoid; page-break-inside: avoid; }
+  .schedule-program { break-after: avoid; }
+
   /* Bracket section */
   .bracket-wrap { margin-top: 24px; filter: grayscale(1); }
   .bracket-inner { overflow: visible; background: white !important; }
@@ -239,4 +288,4 @@ window.addEventListener("load", function() {
   return null;
 }
 
-export function printFixture(ref:React.RefObject<HTMLDivElement|null>,event:string,timeZone:string){return openPrintWindow(escape(event),'Fixture and Result',captureSvgHtml(ref),'',true,false,'A4 landscape',timeZone);}
+export function printFixture(ref:React.RefObject<HTMLDivElement|null>,event:string,timeZone:string,audienceHtml?:string){return openPrintWindow(escape(event),audienceHtml===undefined?'Fixture and Result':'Match Schedule',audienceHtml??captureSvgHtml(ref),'',true,false,'A4 landscape',timeZone);}

@@ -69,6 +69,7 @@ public sealed class LiveRuntime(SetupStore store,IDbContextFactory<TLSDbContext>
         var s=store.Change(request.Revision,"COURT_ASSIGN",s=>
         {
             var m=Find(s,request.MatchId);ResultDependencies.Ready(m);TournamentRules.Need(m.Status is MatchStatus.Scheduled or MatchStatus.Playing or MatchStatus.Review,"Only queued, playing or submitted matches can be assigned.");
+            if(m.Status==MatchStatus.Scheduled)TournamentRules.Need(SchedulePlanner.CallProblem(s,m) is null,SchedulePlanner.CallProblem(s,m)??"");
             TournamentRules.Need(m.Start.HasValue&&m.End.HasValue&&m.Court.HasValue,"Schedule the match before assigning a tablet.");
             TournamentRules.Need(request.Court>=1&&request.Court<=s.CourtCount&&!s.Venue.ClosedCourts.Contains(request.Court),"Choose an open venue court.");
             TournamentRules.Need(!MatchStatus.Occupied(m.Status)||request.Court==m.Court,"An in-progress match cannot be moved to another court.");
@@ -129,7 +130,7 @@ public sealed class LiveRuntime(SetupStore store,IDbContextFactory<TLSDbContext>
     }
     public object Command(string token,TabletCommand request,HttpContext context)
     {
-        TournamentRules.Need(request.OperationId!=Guid.Empty&&request.Action is "START" or "POINT" or "UNDO" or "NEXT" or "SUBMIT" or "SHUTTLE" or "CARD" or "CHALLENGE" or "SETUP" or "PAPER","Choose a valid tablet action with a unique operation ID.");
+        TournamentRules.Need(request.OperationId!=Guid.Empty&&request.Action is "START" or "POINT" or "UNDO" or "UNDO_POINT" or "NEXT" or "SUBMIT" or "SHUTTLE" or "SHUTTLE_MINUS" or "CARD" or "CHALLENGE" or "SETUP" or "PAPER","Choose a valid tablet action with a unique operation ID.");
         var hash=LiveAccess.Hash(JsonSerializer.Serialize(request,JsonDefaults.Options));string commandMatchId="";
         var s=store.ChangeRealtime("TABLET_SCORE",s=>
         {
@@ -156,20 +157,27 @@ public sealed class LiveRuntime(SetupStore store,IDbContextFactory<TLSDbContext>
                     TournamentRules.Need(live.A<=m.Rules.PointCap&&live.B<=m.Rules.PointCap,"Score exceeds the match point cap.");
                     if(MatchResults.GameWon(live.A,live.B,m.Rules)){m.Games.Add(new(live.A,live.B));live.AwaitingNextGame=true;live.IntervalUntil=MatchResults.Won(m)?null:DateTimeOffset.UtcNow.AddSeconds(m.Rules.BetweenGamesSeconds);}
                 }
-                else if(request.Action is "SHUTTLE" or "CARD" or "CHALLENGE")
+                else if(request.Action is "SHUTTLE" or "SHUTTLE_MINUS" or "CARD" or "CHALLENGE")
                 {
                     var game=Math.Max(1,m.Games.Count+(live.AwaitingNextGame?0:1));
-                    if(request.Action=="SHUTTLE")
-                    {TournamentRules.Need(m.Rules.CountShuttles,"Shuttle tracking is disabled for this match.");live.Details.ShuttlesUsed=(live.Details.ShuttlesUsed??0)+1;}
+                    if(request.Action is "SHUTTLE" or "SHUTTLE_MINUS")
+                    {
+                        TournamentRules.Need(m.Rules.CountShuttles,"Shuttle tracking is disabled for this match.");
+                        var used=live.Details.ShuttlesUsed??0;
+                        TournamentRules.Need(request.Action!="SHUTTLE_MINUS"||used>0,"Shuttle count is already zero.");
+                        live.Details.ShuttlesUsed=used+(request.Action=="SHUTTLE"?1:-1);
+                    }
                     else if(request.Action=="CARD")
                     {TournamentRules.Need(m.Rules.CardsEnabled,"Card tracking is disabled for this match.");live.Details.Cards.Add(new(request.ParticipantId??"",request.CardType??"",game,request.Remark));}
                     else
                     {TournamentRules.Need(m.Rules.ChallengesEnabled&&m.ReviewAvailable,"Challenges are not available for this match assignment.");TournamentRules.Need(request.Outcome!="U"||live.Details.Challenges.Count(c=>c.Side==request.Side&&c.Game==game&&c.Outcome=="U")<m.Rules.ChallengesPerGame,"No challenges remain for this side in the current game.");live.Details.Challenges.Add(new(request.Side??"",game,request.Outcome??""));}
                     ResultValidation.Details(s,m,live.Details);
                 }
-                else if(request.Action=="UNDO")
+                else if(request.Action is "UNDO" or "UNDO_POINT")
                 {
-                    TournamentRules.Need(live.History.Count>0,"No scoring action can be undone.");var previous=live.History[^1];live.History.RemoveAt(live.History.Count-1);live.A=previous.A;live.B=previous.B;live.AwaitingNextGame=previous.AwaitingNextGame;m.Games=previous.Games;live.Serving=BadmintonServing.Copy(previous.Serving);live.IntervalUntil=previous.IntervalUntil;
+                    var index=request.Action=="UNDO_POINT"?PointUndoIndex(m):live.History.Count-1;
+                    TournamentRules.Need(index>=0,request.Action=="UNDO_POINT"?"No point can be undone.":"No scoring action can be undone.");
+                    var previous=live.History[index];live.History.RemoveRange(index,live.History.Count-index);live.A=previous.A;live.B=previous.B;live.AwaitingNextGame=previous.AwaitingNextGame;m.Games=previous.Games;live.Serving=BadmintonServing.Copy(previous.Serving);live.IntervalUntil=previous.IntervalUntil;
                     if(previous.RallyCount is int count&&count<live.Rallies.Count)live.Rallies.RemoveRange(count,live.Rallies.Count-count);
                 }
                 else if(request.Action=="NEXT")
@@ -198,23 +206,29 @@ public sealed class LiveRuntime(SetupStore store,IDbContextFactory<TLSDbContext>
         if(request.Action=="PAPER")return new{serverTime=DateTimeOffset.UtcNow,heartbeatSeconds=HeartbeatSeconds,sessionId="",match=Row(s,Find(s,commandMatchId))};
         Touch(Authenticate(s,token),context);return TabletView(s,token);
     }
+    private static int PointUndoIndex(TournamentMatch m)
+    {
+        if(m.Live is not {} live)return -1;
+        // Completed games already contain the winning point; do not count it twice.
+        var points=m.Games.Sum(g=>g.A+g.B)+(live.AwaitingNextGame?0:live.A+live.B);
+        return live.History.FindLastIndex(h=>h.Games.Sum(g=>g.A+g.B)+(h.AwaitingNextGame?0:h.A+h.B)<points);
+    }
     private static void Remember(TournamentMatch m)
     {
         var live=m.Live!;live.History.Add(new(live.A,live.B,live.AwaitingNextGame,m.Games.ToList(),BadmintonServing.Copy(live.Serving),live.IntervalUntil,live.Rallies.Count));if(live.History.Count>50)live.History.RemoveAt(0);
     }
     private static void CheckStart(SetupData s,TournamentMatch m,bool confirmEarlyStart)
     {
+        TournamentRules.Need(SchedulePlanner.CallProblem(s,m) is null,SchedulePlanner.CallProblem(s,m)??"");
         ResultDependencies.Ready(m);TournamentRules.Need(m.RulesAssigned,"Assign a saved game preset before starting.");EventOperations.CheckStart(s,m);
         var now=LocalNow(s);var eventId=s.Programs.Single(p=>p.Id==m.ProgramId).EventId;var plan=TournamentRules.Event(s,eventId);var ev=s.Events.Single(e=>e.Id==eventId);
-        var sessions=EventOperations.Sessions(s,plan).ToList();
-        var active=sessions.Any(w=>w.Date.ToDateTime(w.Start)<=now&&now<w.Date.ToDateTime(w.End));
         var early=m.Start>now;
         TournamentRules.Need(DateOnly.FromDateTime(now)>=ev.StartDate&&DateOnly.FromDateTime(now)<=ev.EndDate,"The match must start within the event dates.");
         if(early){
             TournamentRules.Need(m.Start!.Value.Date==now.Date,"An early start must be on the scheduled playing date.");
             TournamentRules.Need(confirmEarlyStart,"This match is starting earlier than scheduled. Confirm the early start to continue.");
         }
-        TournamentRules.Need(active||early,"The match must start within an active playing session.");
+        TournamentRules.Need(m.Start!.Value.Date==now.Date,"The match must start on its scheduled playing date.");
         TournamentRules.Need(m.Court.HasValue&&!s.Venue.ClosedCourts.Contains(m.Court.Value),"This court is closed.");
         TournamentRules.Need(SessionCourts.EligibleCourts(s,plan,m,now).Contains(m.Court!.Value),SessionCourts.UnavailableMessage);
         var officials=TournamentRules.OfficialIds(m).ToHashSet();
@@ -292,14 +306,14 @@ public sealed class LiveRuntime(SetupStore store,IDbContextFactory<TLSDbContext>
     {
         var p=s.Programs.Single(p=>p.Id==m.ProgramId);var ev=s.Events.Single(e=>e.Id==p.EventId);var plan=TournamentRules.Event(s,p.EventId);var live=m.Live;var last=m.Games.LastOrDefault();
         string Name(string? id)=>id is null?"BYE":string.Join(" / ",s.Entries.Single(e=>e.Id==id).ParticipantIds.Select(id=>s.Participants.Single(p=>p.Id==id).Name));
-        return new(){EarlyStartMinutes=m.Status==MatchStatus.Scheduled&&m.Start.HasValue?Math.Max(0,(int)Math.Ceiling((m.Start.Value-LocalNow(s)).TotalMinutes)):0,Serving=live?.Serving,ServerId=BadmintonServing.Server(s,m),ReceiverId=BadmintonServing.Receiver(s,m),IntervalUntil=live?.IntervalUntil,Rallies=live?.Rallies??[],Resumptions=live?.Resumptions??[],TimeZone=s.TimeZone,RallyHistoryComplete=live?.RallyHistoryComplete??false,ReviewAvailable=m.ReviewAvailable,PresetId=m.PresetId,RulesAssigned=m.RulesAssigned,ResultDetails=m.ResultDetails,Players=new[]{"A","B"}.SelectMany(side=>BadmintonServing.Members(s,m,side).Select(id=>new MatchPlayer(id,s.Participants.Single(p=>p.Id==id).Name,side))).ToArray(),Id=m.Id,EventId=ev.Id,EventName=ev.Name,ProgramId=p.Id,ProgramName=p.Name,Number=m.Number,RoundLabel=m.RoundLabel,Status=m.Status,EntryA=m.EntryA,EntryB=m.EntryB,NameA=m.PendingA?"Awaiting earlier result":Name(m.EntryA),NameB=m.PendingB?"Awaiting earlier result":Name(m.EntryB),Court=m.Court,PlannedStart=m.Start,PlannedEnd=m.End,DurationMinutes=m.DurationMinutes,UmpireId=m.UmpireId,ServiceJudgeId=m.ServiceJudgeId,LineJudgeIds=m.LineJudgeIds,UmpireName=plan.Officials.SingleOrDefault(o=>o.Id==m.UmpireId)?.Name??"—",ScoreA=MatchStatus.Finished(m.Status)?last?.A??0:live?.A??0,ScoreB=MatchStatus.Finished(m.Status)?last?.B??0:live?.B??0,Games=m.Games,GamesWonA=m.Games.Count(g=>g.A>g.B),GamesWonB=m.Games.Count(g=>g.B>g.A),Rules=m.Rules,Version=live?.Version??0,StartedAt=live?.StartedAtUtc,FinishedAt=live?.SubmittedAtUtc,AwaitingNextGame=live?.AwaitingNextGame??false,MatchWon=MatchResults.Won(m),CanUndo=(live?.History.Count??0)>0,PaperMode=live?.PaperMode??false,DeviceName=live?.DeviceName??"",DeviceIp=live?.DeviceIp??""};
+        return new(){EarlyStartMinutes=m.Status==MatchStatus.Scheduled&&m.Start.HasValue?Math.Max(0,(int)Math.Ceiling((m.Start.Value-LocalNow(s)).TotalMinutes)):0,Serving=live?.Serving,ServerId=BadmintonServing.Server(s,m),ReceiverId=BadmintonServing.Receiver(s,m),IntervalUntil=live?.IntervalUntil,Rallies=live?.Rallies??[],Resumptions=live?.Resumptions??[],TimeZone=s.TimeZone,RallyHistoryComplete=live?.RallyHistoryComplete??false,ReviewAvailable=m.ReviewAvailable,PresetId=m.PresetId,RulesAssigned=m.RulesAssigned,ResultDetails=m.ResultDetails,Players=new[]{"A","B"}.SelectMany(side=>BadmintonServing.Members(s,m,side).Select(id=>new MatchPlayer(id,s.Participants.Single(p=>p.Id==id).Name,side))).ToArray(),Id=m.Id,EventId=ev.Id,EventName=ev.Name,ProgramId=p.Id,ProgramName=p.Name,Number=m.Number,RoundLabel=m.RoundLabel,Status=m.Status,EntryA=m.EntryA,EntryB=m.EntryB,NameA=m.PendingA?"Awaiting earlier result":Name(m.EntryA),NameB=m.PendingB?"Awaiting earlier result":Name(m.EntryB),Court=m.Court,PlannedStart=m.Start,PlannedEnd=m.End,DurationMinutes=m.DurationMinutes,UmpireId=m.UmpireId,ServiceJudgeId=m.ServiceJudgeId,LineJudgeIds=m.LineJudgeIds,UmpireName=plan.Officials.SingleOrDefault(o=>o.Id==m.UmpireId)?.Name??"—",ScoreA=MatchStatus.Finished(m.Status)?last?.A??0:live?.A??0,ScoreB=MatchStatus.Finished(m.Status)?last?.B??0:live?.B??0,Games=m.Games,GamesWonA=m.Games.Count(g=>g.A>g.B),GamesWonB=m.Games.Count(g=>g.B>g.A),Rules=m.Rules,Version=live?.Version??0,StartedAt=live?.StartedAtUtc,FinishedAt=live?.SubmittedAtUtc,AwaitingNextGame=live?.AwaitingNextGame??false,MatchWon=MatchResults.Won(m),CanUndo=(live?.History.Count??0)>0,CanUndoPoint=PointUndoIndex(m)>=0,PaperMode=live?.PaperMode??false,DeviceName=live?.DeviceName??"",DeviceIp=live?.DeviceIp??""};
     }
 }
 public sealed class LiveMatchView
 {
     public int EarlyStartMinutes {get;set;}
     public ServingState? Serving {get;set;}public string ServerId {get;set;}="";public string ReceiverId {get;set;}="";public DateTimeOffset? IntervalUntil {get;set;}public List<RallyRecord> Rallies {get;set;}=[];public List<ResumePoint> Resumptions {get;set;}=[];public string TimeZone {get;set;}="Asia/Singapore";public bool RallyHistoryComplete {get;set;}public bool ReviewAvailable {get;set;}
-    public string? PresetId {get;set;}public bool RulesAssigned {get;set;}public ResultDetails ResultDetails {get;set;}=new();public MatchPlayer[] Players {get;set;}=[];public string Id {get;set;}="";public string EventId {get;set;}="";public string EventName {get;set;}="";public string ProgramId {get;set;}="";public string ProgramName {get;set;}="";public int Number {get;set;}public string RoundLabel {get;set;}="";public string Status {get;set;}="";public string EntryA {get;set;}="";public string? EntryB {get;set;}public string NameA {get;set;}="";public string NameB {get;set;}="";public int? Court {get;set;}public DateTime? PlannedStart {get;set;}public DateTime? PlannedEnd {get;set;}public int DurationMinutes {get;set;}public string? ServiceJudgeId {get;set;}public string[] LineJudgeIds {get;set;}=[];public string? UmpireId {get;set;}public string UmpireName {get;set;}="";public int ScoreA {get;set;}public int ScoreB {get;set;}public List<GameScore> Games {get;set;}=[];public int GamesWonA {get;set;}public int GamesWonB {get;set;}public BadmintonRules Rules {get;set;}=new();public long Version {get;set;}public DateTimeOffset? StartedAt {get;set;}public DateTimeOffset? FinishedAt {get;set;}public bool AwaitingNextGame {get;set;}public bool MatchWon {get;set;}public bool CanUndo {get;set;}public bool PaperMode {get;set;}public string DeviceName {get;set;}="";public string DeviceIp {get;set;}="";
+    public string? PresetId {get;set;}public bool RulesAssigned {get;set;}public ResultDetails ResultDetails {get;set;}=new();public MatchPlayer[] Players {get;set;}=[];public string Id {get;set;}="";public string EventId {get;set;}="";public string EventName {get;set;}="";public string ProgramId {get;set;}="";public string ProgramName {get;set;}="";public int Number {get;set;}public string RoundLabel {get;set;}="";public string Status {get;set;}="";public string EntryA {get;set;}="";public string? EntryB {get;set;}public string NameA {get;set;}="";public string NameB {get;set;}="";public int? Court {get;set;}public DateTime? PlannedStart {get;set;}public DateTime? PlannedEnd {get;set;}public int DurationMinutes {get;set;}public string? ServiceJudgeId {get;set;}public string[] LineJudgeIds {get;set;}=[];public string? UmpireId {get;set;}public string UmpireName {get;set;}="";public int ScoreA {get;set;}public int ScoreB {get;set;}public List<GameScore> Games {get;set;}=[];public int GamesWonA {get;set;}public int GamesWonB {get;set;}public BadmintonRules Rules {get;set;}=new();public long Version {get;set;}public DateTimeOffset? StartedAt {get;set;}public DateTimeOffset? FinishedAt {get;set;}public bool AwaitingNextGame {get;set;}public bool MatchWon {get;set;}public bool CanUndo {get;set;}public bool CanUndoPoint {get;set;}public bool PaperMode {get;set;}public string DeviceName {get;set;}="";public string DeviceIp {get;set;}="";
 }
 
 public sealed record MatchPlayer(string Id,string Name,string Side="");

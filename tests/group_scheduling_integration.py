@@ -51,10 +51,10 @@ try:
   if expect==200:
    capacity=call('scheduling/capacity',body)
    result=call('scheduling/preview',body)
-   check(capacity['matches']==result['matches']);check(capacity['unplaced']==result['unplaced'])
+   check(not capacity['matches'] and not capacity['unplaced'])
    for actual,summary in zip(capacity['sessions'],result['sessions']):
     check(actual['capacity']>=summary['capacity'])
-    check([(p['programId'],p['requested'],p['scheduled']) for p in actual['programs'] if p['requested'] or p['scheduled']]==[(p['programId'],p['requested'],p['scheduled']) for p in summary['programs'] if p['requested'] or p['scheduled']])
+    check(not actual['programs'])
    return result
   return call('scheduling/preview',body,expect)
  def save(p,expect=200):return call('scheduling/confirm',{'revision':p['revision'],'token':p['token']},expect)
@@ -72,19 +72,19 @@ try:
   if len(g['entryIds'])%2==0:check(set([rows[0]['entryA'],rows[0]['entryB']]).isdisjoint([rows[1]['entryA'],rows[1]['entryB']]))
   for id in g['entryIds']:
    games=sorted([m for m in rows if id in [m['entryA'],m['entryB']]],key=lambda m:m['start'])
-   for x,y in zip(games,games[1:]):check(datetime.fromisoformat(y['start'])>=datetime.fromisoformat(x['end'])+timedelta(minutes=120))
- # Shared players across programs retain their planning rest, not just group-local rest.
+   for x,y in zip(games,games[1:]):check(datetime.fromisoformat(y['start'])>=datetime.fromisoformat(x['end']))
+ # Shared players across programs must not overlap, even with legacy rest settings.
  shared=preview(request([session(first,'08:00:00','22:00:00',[1,2,3,4],a+c,{pids[0]:len(a),pids[2]:len(c)})],120))
  check(any(m['programId']==pids[2] for m in shared['matches']))
  people={e['id']:set(e['participantIds']) for e in state()['entries']}
  for x in shared['matches']:
   for y in shared['matches']:
    if x['id']==y['id'] or x['start']>y['start']:continue
-   if (people[x['entryA']]|people[x['entryB']])&(people[y['entryA']]|people[y['entryB']]):check(datetime.fromisoformat(y['start'])>=datetime.fromisoformat(x['end'])+timedelta(minutes=120))
+   if (people[x['entryA']]|people[x['entryB']])&(people[y['entryA']]|people[y['entryB']]):check(datetime.fromisoformat(y['start'])>=datetime.fromisoformat(x['end']))
  # Quantities are maximum new assignments, not extra matches used to fill spare courts.
  quota=request([session(first,'10:00:00','12:00:00',[1,2,3,4],a+b,{pids[0]:2,pids[1]:3})])
  q=preview(quota);check(len(q['matches'])==5);check(sum(m['programId']==pids[0] for m in q['matches'])==2);check(sum(m['programId']==pids[1] for m in q['matches'])==3)
- check(q['sessions'][0]['capacity']==5);check(len(q['unplaced'])==len(a+b)-5)
+ check(q['sessions'][0]['capacity']==12);check(len(q['unplaced'])==len(a+b)-5)
  invalid=copy.deepcopy(quota);invalid['sessions'][0]['programLimits'][pids[0]]=len(a)+1;preview(invalid,400);check(view()==before)
  # A short session reports a quota shortfall rather than assigning beyond its finish.
  short=copy.deepcopy(quota);short['sessions'][0].update(end='10:40:00',courts=[1]);short['days'][0]['courts']=[1]

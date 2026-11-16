@@ -1,3 +1,7 @@
+# Current whole-tournament workflow
+
+See [Whole-tournament schedule planner](TOURNAMENT_SCHEDULE_PLANNER.md) for the 16 November 2026 workflow: per-round durations, future slots, sessions, complete Auto Assign, rest/information review and Move/Swap. It supersedes older event-wide duration and current-round-only UI descriptions below. Legacy API notes remain for compatibility.
+
 # Separate draw and scheduling — 21 October 2026
 
 ## Admin workflow
@@ -225,3 +229,43 @@ Verification: all 29 focused scheduling-screen tests passed, covering singles/do
 Save Session validates and saves the planning draft in the event operation JSON. Reloading or returning to Schedule restores it, including unfinished cards. Confirm Schedule alone publishes match slots and clears the draft. Saving uses the current revision; another admin's changes require refresh. Validation runs on an isolated simulation so it cannot accidentally publish allocations while saving. Removal/edits after a save remain local until another Save Session or final confirmation.
 
 Drafts add no SQL tables or migrations. They are separate from confirmed event sessions and match slots. Existing capacity and preview calculations continue using the same allocator; no extra player-readiness restrictions were added.
+
+
+### Fixed session capacity and administrator-managed rest — 5 November 2026
+
+This supersedes the earlier simulation-based capacity and minimum-rest descriptions. Capacity and Preview use `SessionAllocation.Capacity`: selected court count × floor(session duration / estimated match duration). Capacity does not depend on selected programs, available match count, quantities in another session, or the legacy rest value. Per-program quantity bounds share the target session’s slots; the screen separately limits quantities to unallocated matches.
+
+Minimum rest is no longer enforced by automatic placement, overrides or swaps. Actual player, court and official overlaps, group rotation ordering, prerequisite completion and session boundaries remain validated. Back-to-back play is allowed. Admins review Preview and swap matches when players need more rest. The rest input is removed; `RestMinutes` remains a compatibility field and is ignored by placement. New plans and saved event settings use zero.
+
+Save Session validates requested totals against fixed capacity. The screen caps quantities to the physical slot budget, but preserves quantities within that budget instead of silently reducing them to the simulated placement count. Preview still reports actual placed and unplaced matches: a particular player mix or existing booking can prevent filling every physical slot. Capacity is a court-time budget, not a guarantee that every arbitrary selection fits. No SQL migration or existing-data reset is required. Rollback restores the matching source and served assets; stored compatibility fields remain readable.
+
+Verification: backend build passed with zero warnings/errors; frontend production build passed with the existing bundle-size warning. All 211 frontend tests and 131 focused rules checks passed. Disposable SQL integration passed 332 capacity checks, 128 session-scheduling checks, 236 group-scheduling checks, 141 scheduling checks and 127 session-confirmation checks. Coverage includes independent capacity, legacy rest ignored, back-to-back play, overlap protection, swaps, quantities, revisions and persistence. TLS was restarted with the updated served assets; existing event records were not reset.
+
+
+### Capacity refresh during quantity editing — 5 November 2026
+
+The scheduling screen keys capacity requests by event, estimated match duration and the dated session times/courts. Changing match quantities or program selection reuses the current physical capacities and does not show a new loading state or call the capacity API. Quantity bounds update immediately from current allocations and the returned slot budget. Time/court/session changes still refresh capacity, and outdated responses remain ignored. Physical-capacity clamping uses the current form rather than the form captured when a request began. Preview and Save Session continue their existing server validation. This is a frontend-only change with no API contract, database or service configuration changes. Rollback restores EventSchedule.tsx and its served frontend assets.
+
+Verification: production frontend build passed with the existing bundle-size warning. All 32 focused scheduling tests passed, including no extra capacity requests/loading state on count or program edits, immediate shared quantity limits, and stale-response protection. The full workflow run passed the other 211 tests; the two new label-encoding failures were corrected and verified in the focused rerun. Updated assets were copied to the running TLS service without a backend restart.
+
+
+### Capacity, session saving and placement are separate - 5 November 2026
+
+This supersedes earlier descriptions that couple capacity to simulation, globally validate unfinished cards, or silently reconcile quantities. `SessionAllocation.Capacity` is the shared court-time formula: distinct selected courts multiplied by floor(session duration / estimated match duration). It returns an incomplete value for reversed/equal times or invalid duration, and zero when no courts are selected. Past times, dates outside the event, overlapping sessions, program selections, requested quantities, player identities, officials and rest do not affect this arithmetic.
+
+`POST /api/scheduling/capacity` checks event/revision/request structure, then returns each card independently. It never invokes the scheduler or event/session business validation. `capacity` can be null with a card-specific `issue`; `available` is the number of additional full-duration court slots left between existing planned bookings. Total capacity is unchanged by bookings. Planned court bookings across events are counted; selected move IDs release their source slots for assessment. No live player readiness or rest calculation is involved. Legacy response fields `programs`, `matches` and `unplaced` remain empty, and `kept` is zero; actual placement details belong to Preview. Existing clients must use Preview for placement, not the capacity response.
+
+The screen reuses unchanged cards while another card recalculates. Count/program changes do not call the capacity API. An invalid card shows a dash, with its time warning deferred to Save Session; zero selected courts displays zero. Manual quantities survive time/court changes, restored drafts and changed limits. The admin can reduce an over-limit count without the screen truncating it to the new limit. Only a newly generated automatic program selection is initially limited to available space. Select All shares the available budget among programs; it cannot fill the same free slots twice. Remaining match counts and capacity are separate values.
+
+Save Session validates the selected card, its quantities, current venue clock, saved-session overlaps, open courts and existing scheduled-match protection without placing any matches. `dirtySessions` is an optional addition to `/validate-session` and is also used by `/draft`: other unfinished cards do not validate or replace published sessions yet. Published booked sessions remain protected while those cards are unfinished. All submitted cards are retained in the planning draft with their dirty flags; no match slots are published. Cross-session requests cannot exceed remaining matches. The warning is returned on the save action rather than during capacity calculation.
+
+Preview still requires all cards to be saved and validates the whole plan. It runs the actual allocator with player/court/official overlap, prerequisite and group-order checks, reports shortfalls and retains existing bookings. Confirm retains revision, current-time, slot and saved-match checks. Swaps retain their existing protections. Capacity is a court-time budget and cannot guarantee every particular combination of players fills all slots. Player rest remains the admin's responsibility.
+
+No SQL migration, reset or imported-data change is required. Rollback restores the matching backend/frontend code and assets; existing planning-draft JSON stays readable. Relevant files: SessionAllocation.cs, ScheduleEndpoints.cs, EventSchedule.tsx, scheduling tests and this guide.
+
+Verification for the separated flow: backend build passed with zero warnings/errors; frontend build passed with the existing bundle-size warning. All 217 frontend tests and 131 focused rules checks passed. Disposable SQL suites passed: 377 capacity checks (including date-level legacy courts), 140 session-confirmation checks, 228 group-scheduling checks, 128 session-scheduling checks and 141 scheduling checks. Assertion counts can vary with generated draws. A read-only call to the restarted local service returned capacities 16 and 12 for past, overlapping 15:30-18:30 and 18:00-20:00 sessions with four courts and 40-minute estimates. No local event slots were confirmed or reset during this check.
+
+
+## Reset lifecycle update - 6 November 2026
+
+[Reset lifecycle](RESET_LIFECYCLE.md) is authoritative for result/schedule clearing, history-independent eligibility, dependent-round and draft cleanup, device recovery, same-day operation and result-delivery retries. It supersedes conflicting historical descriptions above.

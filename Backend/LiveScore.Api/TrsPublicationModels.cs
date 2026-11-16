@@ -16,3 +16,5 @@ public sealed record SpectatorMatch(string Id, int ProgramId, string ProgramName
     string MatchDate, string StartTime, string EndTime, string Court, string Status, int? ScoreA, int? ScoreB, string? ServerSide);
 public sealed record TrsScoreSnapshot(int SchemaVersion, int EventId, string EventName, int? ProgramId, string ProgramName,
     long Version, DateTimeOffset GeneratedAt, string TimeZone, int RefreshSeconds, SpectatorMatch[] Matches);
+
+public sealed record EventSettingsRequest(long Revision, DateOnly StartDate, DateOnly EndDate, EventPlan Plan, TrsPublicationRequest? Publishing);

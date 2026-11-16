@@ -1,7 +1,8 @@
 import {capacityReply} from './schedule-capacity-fixture';
-import {cleanup,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
+import {act,cleanup,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
 import {afterEach,beforeEach,expect,test,vi} from 'vitest';
-import EventSchedule from '../src/EventSchedule';
+// Retained regression coverage for the legacy scheduling client during API compatibility.
+import {LegacyEventSchedule as EventSchedule} from '../src/EventSchedule';
 import type {Match,View} from '../src/tournament-types';
 const service=vi.hoisted(()=>({api:vi.fn(),capacity:vi.fn()}));vi.mock('../src/api',()=>({api:(path:string,...args:any[])=>path==='scheduling/capacity'?service.capacity(args[1]):service.api(path,...args)}));
 globalThis.ResizeObserver=class {observe(){}unobserve(){}disconnect(){}} as unknown as typeof ResizeObserver;
@@ -47,8 +48,8 @@ test('capacity comes from the scheduling response while preview reports compact 
  service.api.mockImplementation(async(path:string)=>path.startsWith('tournament/')?structuredClone(view):{token:'t',revision:8,matches:[],unplaced:[{id:'m2',number:2,programId:'a'},{id:'m3',number:3,programId:'a'},{id:'m4',number:4,programId:'a'}],kept:1,sessions:[{index:0,date:'2026-10-27',start:'10:00:00',end:'12:00:00',programs:[{programId:'a',requested:3,scheduled:0}]}]});
  show();await screen.findByLabelText('Schedule date');await ready();await waitFor(()=>expect(screen.getByText(/Match capacity for this session:/).textContent).toContain('12'));
  await waitFor(()=>expect((screen.getByRole('button',{name:'Preview Schedule'}) as HTMLButtonElement).disabled).toBe(false));await saveSessions();fireEvent.click(screen.getByRole('button',{name:'Preview Schedule'}));
- expect(await screen.findByText('Program A · Group stage — 3 matches awaiting scheduling')).toBeTruthy();
- expect(document.querySelectorAll('details')).toHaveLength(1);expect(screen.queryByText(/No space on/)).toBeNull();
+ expect(await screen.findByText('Program A · Group stage — 3/4 matches unscheduled')).toBeTruthy();
+ expect(document.querySelectorAll('details')).toHaveLength(0);expect(screen.queryByText(/Add another session/)).toBeNull();expect(screen.queryByText(/Existing assignments stay unchanged/)).toBeNull();
 });
 test('fulfilled quantities do not silently request extra matches when reopening',async()=>{
  view.eventPlan.sessions[0].programLimits={a:0};show();await screen.findByLabelText('Schedule date');await ready();
@@ -80,9 +81,9 @@ test('quantities cannot exceed the unallocated total and deselection restores av
  show();await screen.findByLabelText('Schedule date');await ready();
  const first=screen.getByLabelText('Session 1 Program A matches') as HTMLInputElement;
  const second=screen.getByLabelText('Session 2 Program A matches') as HTMLInputElement;
- expect(second.value).toBe('2');expect(second.max).toBe('2');
+ expect(second.value).toBe('3');expect(second.max).toBe('2');
  expect(within(screen.getByRole('region',{name:'Session 2'})).getByText('0 matches not allocated to sessions')).toBeTruthy();
- fireEvent.change(first,{target:{value:'2'}});await ready();expect(first.value).toBe('1');expect(second.value).toBe('2');fireEvent.click(screen.getByRole('button',{name:'OK'}));
+ fireEvent.change(first,{target:{value:'2'}});await ready();expect(first.value).toBe('1');expect(second.value).toBe('3');fireEvent.click(screen.getByRole('button',{name:'OK'}));
  fireEvent.change(second,{target:{value:'1'}});await ready();expect(first.max).toBe('2');
  fireEvent.change(first,{target:{value:'2'}});await ready();expect(first.value).toBe('2');expect(second.max).toBe('1');
  fireEvent.click(within(screen.getByRole('region',{name:'Session 1'})).getByRole('switch',{name:'Program A · Group stage'}));await ready();
@@ -92,16 +93,16 @@ test('quantities cannot exceed the unallocated total and deselection restores av
  const body=service.api.mock.calls.find(c=>c[0]==='scheduling/preview')![2];expect(body.sessions[1].programLimits.a).toBe(1);
 });
 
-test('remaining quantities follow time order rather than session display order and keep programs independent',async()=>{
+test('existing quantities remain unchanged regardless of session ordering',async()=>{
  view.eventPlan.sessions[0]={...view.eventPlan.sessions[0],start:'14:00:00',end:'18:00:00',matchIds:['m2','m3','m4','m5','m6'],programLimits:{a:3,b:2}};
  view.eventPlan.sessions.splice(1,0,{date:'2026-10-27',start:'10:00:00',end:'12:00:00',courts:[1],matchIds:['m2','m3','m4'],programLimits:{a:2}});
  show();await screen.findByLabelText('Schedule date');await ready();
- expect((screen.getByLabelText('Session 1 Program A matches') as HTMLInputElement).value).toBe('1');
+ expect((screen.getByLabelText('Session 1 Program A matches') as HTMLInputElement).value).toBe('3');
  expect((screen.getByLabelText('Session 1 Program B matches') as HTMLInputElement).value).toBe('2');
  await waitFor(()=>expect((screen.getByRole('button',{name:'Preview Schedule'}) as HTMLButtonElement).disabled).toBe(false));await saveSessions();fireEvent.click(screen.getByRole('button',{name:'Preview Schedule'}));
  await waitFor(()=>expect(service.api.mock.calls.some(c=>c[0]==='scheduling/preview')).toBe(true));
  const body=service.api.mock.calls.find(c=>c[0]==='scheduling/preview')![2];
- expect(body.sessions[0].programLimits).toEqual({a:1,b:2});expect(body.sessions[1].programLimits).toEqual({a:2});
+ expect(body.sessions[0].programLimits).toEqual({a:3,b:2});expect(body.sessions[1].programLimits).toEqual({a:2});
 });
 
 
@@ -156,11 +157,13 @@ test('program quantities share session capacity and Select All cannot overfill i
  const body=service.api.mock.calls.find(c=>c[0]==='scheduling/preview')![2];expect(body.sessions[0].programLimits).toEqual({a:10,b:2});
 });
 
-test('requests are reduced to the placements returned by the shared calculation',async()=>{
+test('entered quantities are preserved when they exceed the physical session capacity',async()=>{
  const rows=Array.from({length:24},(_,i)=>match('m'+(i+100),'a'));view.plans[0].matches=rows;view.eventPlan.sessions[0].matchIds=rows.map(m=>m.id);view.eventPlan.sessions[0].programLimits={a:24};
  service.capacity.mockImplementation(async body=>capacityReply(view,body,8));show();await screen.findByLabelText('Schedule date');await ready();
- await waitFor(()=>expect((screen.getByLabelText('Session 1 Program A matches') as HTMLInputElement).value).toBe('8'));await ready();expect(screen.getByText(/Match capacity for this session:/).textContent).toContain('8 matches');
- expect(screen.getByText('16 matches not allocated to sessions')).toBeTruthy();
+ await waitFor(()=>expect((screen.getByLabelText('Session 1 Program A matches') as HTMLInputElement).value).toBe('24'));await ready();expect(screen.getByText(/Match capacity for this session:/).textContent).toContain('8 matches');
+ expect(screen.getByText('0 matches not allocated to sessions')).toBeTruthy();
+ fireEvent.change(screen.getByLabelText('Session 1 Program A matches'),{target:{value:'20'}});expect((screen.getByLabelText('Session 1 Program A matches') as HTMLInputElement).value).toBe('20');
+ fireEvent.click(screen.getByRole('button',{name:'Save Session'}));expect(screen.getByRole('dialog').textContent).toContain('8 matches');
 });
 
 test('first Add Session caps the automatically selected current program, then another program uses the free slots',async()=>{
@@ -258,4 +261,123 @@ test('a late response from an old session configuration cannot replace the curre
  fireEvent.click(screen.getByRole('switch',{name:'Session 1 Court 1'}));await waitFor(()=>expect(pending).toHaveLength(2));
  pending[1].resolve(capacityReply(view,pending[1].body,5));await ready();expect(screen.getByText(/Match capacity for this session:/).textContent).toContain('5 matches');
  pending[0].resolve(capacityReply(view,pending[0].body,99));await waitFor(()=>expect(screen.getByText(/Match capacity for this session:/).textContent).toContain('5 matches'));
+});
+
+
+test('placement shortfalls do not silently reduce quantities within physical capacity',async()=>{
+ view.eventPlan.sessions[0].programLimits={a:3};
+ service.capacity.mockImplementation(async body=>{const result=capacityReply(view,body,16);for(const w of result.sessions)for(const p of w.programs)p.scheduled=0;return result;});
+ show();await screen.findByLabelText('Schedule date');await ready();
+ expect((screen.getByLabelText('Session 1 Program A matches') as HTMLInputElement).value).toBe('3');
+ expect(screen.getByText(/Match capacity for this session:/).textContent).toContain('16 matches');
+});
+
+
+test('count edits and program selection keep capacity visible without another capacity request',async()=>{
+ view.eventPlan.sessions[0].programLimits={a:3};
+ show();await screen.findByLabelText('Schedule date');await ready();
+ expect(service.capacity).toHaveBeenCalledTimes(1);
+ const input=screen.getByLabelText('Session 1 Program A matches') as HTMLInputElement;
+ fireEvent.change(input,{target:{value:'2'}});
+ expect(input.value).toBe('2');expect(input.disabled).toBe(false);
+ expect(screen.queryByText('Calculating capacity\u2026')).toBeNull();
+ expect(screen.getByText(/Match capacity for this session:/).textContent).toContain('12 matches');
+ fireEvent.click(screen.getByRole('switch',{name:'Program B \u00b7 Group stage'}));
+ expect((screen.getByLabelText('Session 1 Program B matches') as HTMLInputElement).value).toBe('2');
+ expect(screen.queryByText('Calculating capacity\u2026')).toBeNull();
+ fireEvent.click(screen.getByRole('switch',{name:'Program B \u00b7 Group stage'}));
+ await act(async()=>{await new Promise(resolve=>setTimeout(resolve,350));});
+ expect(service.capacity).toHaveBeenCalledTimes(1);
+ expect(input.value).toBe('2');expect(input.disabled).toBe(false);
+});
+
+test('shared quantity bounds update immediately without waiting for the capacity service',async()=>{
+ view.plans[0].matches=Array.from({length:24},(_,i)=>match('m'+(i+100),'a'));
+ view.eventPlan.sessions[0].matchIds=view.plans[0].matches.map(m=>m.id);
+ view.eventPlan.sessions[0].programLimits={a:12};
+ show();await screen.findByLabelText('Schedule date');await ready();
+ const a=screen.getByLabelText('Session 1 Program A matches') as HTMLInputElement;
+ expect((screen.getByRole('switch',{name:'Program B \u00b7 Group stage'}) as HTMLButtonElement).disabled).toBe(true);
+ fireEvent.change(a,{target:{value:'10'}});
+ fireEvent.click(screen.getByRole('switch',{name:'Program B \u00b7 Group stage'}));
+ expect(a.max).toBe('10');
+ expect((screen.getByLabelText('Session 1 Program B matches') as HTMLInputElement).value).toBe('2');
+ expect(screen.queryByText('Calculating capacity\u2026')).toBeNull();
+ expect(service.capacity).toHaveBeenCalledTimes(1);
+});
+
+
+test('overlapping and past session times keep capacity visible until Save Session validates',async()=>{
+ view.eventPlan.sessions=[{date:'2026-10-27',start:'15:00:00',end:'18:30:00',courts:[1,2,3,4],matchIds:['m2','m3','m4'],programLimits:{a:1}},{date:'2026-10-27',start:'18:00:00',end:'20:00:00',courts:[1,2,3,4],matchIds:['m5','m6'],programLimits:{b:1}}];
+ show();await screen.findByLabelText('Schedule date');await ready();
+ expect(screen.getAllByText(/Match capacity for this session:/).every(p=>p.textContent?.includes('12 matches'))).toBe(true);
+ expect(screen.queryByText(/must not overlap/)).toBeNull();
+ fireEvent.change(screen.getByLabelText('Session 2 Program B matches'),{target:{value:'2'}});
+ fireEvent.click(within(screen.getByRole('region',{name:'Session 2'})).getByRole('button',{name:'Save Session'}));
+ expect(screen.getByRole('dialog').textContent).toContain('overlaps Session 1');
+ expect(service.api.mock.calls.some(c=>c[0]==='scheduling/draft')).toBe(false);
+});
+
+test('a reversed unfinished card cannot hide capacity or block saving a different valid card',async()=>{
+ view.eventPlan.sessions=[{date:'2026-10-27',start:'10:00:00',end:'12:00:00',courts:[1,2,3,4],matchIds:['m2','m3','m4'],programLimits:{a:1}},{date:'2026-10-27',start:'14:00:00',end:'16:00:00',courts:[1,2,3,4],matchIds:[]}];
+ show();await screen.findByLabelText('Schedule date');await ready();
+ await setSessionTime('Session 2 start time','5','PM');
+ const first=within(screen.getByRole('region',{name:'Session 1'})),second=within(screen.getByRole('region',{name:'Session 2'}));
+ expect(first.getByText(/Match capacity for this session:/).textContent).toContain('12 matches');
+ expect(second.getByText(/Match capacity for this session:/).textContent).toContain('\u2014');
+ fireEvent.change(screen.getByLabelText('Session 1 Program A matches'),{target:{value:'2'}});
+ fireEvent.click(first.getByRole('button',{name:'Save Session'}));
+ await waitFor(()=>expect(service.api).toHaveBeenCalledWith('scheduling/draft','POST',expect.objectContaining({sessionIndex:0,dirtySessions:[1]})));
+ expect(service.capacity).toHaveBeenCalledTimes(2);
+});
+
+test('removing all courts yields zero capacity while preserving quantities and the other card',async()=>{
+ view.eventPlan.sessions.splice(1,0,{date:'2026-10-27',start:'14:00:00',end:'16:00:00',courts:[1,2,3,4],matchIds:[]});
+ show();await screen.findByLabelText('Schedule date');await ready();
+ for(let c=1;c<=4;c++)fireEvent.click(screen.getByRole('switch',{name:'Session 1 Court '+c}));await ready();
+ expect(within(screen.getByRole('region',{name:'Session 1'})).getByText(/Match capacity for this session:/).textContent).toContain('0 matches');
+ expect(within(screen.getByRole('region',{name:'Session 2'})).getByText(/Match capacity for this session:/).textContent).toContain('12 matches');
+ expect((screen.getByLabelText('Session 1 Program A matches') as HTMLInputElement).value).toBe('3');
+ fireEvent.click(within(screen.getByRole('region',{name:'Session 1'})).getByRole('button',{name:'Save Session'}));
+ expect(screen.getByRole('dialog').textContent).toContain('Select at least one court');
+});
+
+test('existing bookings reduce only new quantity bounds and keep total capacity unchanged',async()=>{
+ view.plans[0].matches=Array.from({length:24},(_,i)=>match('m'+(i+100),'a'));
+ view.eventPlan.sessions[0].matchIds=[];
+ service.capacity.mockImplementation(async body=>{const result=capacityReply(view,body,16);return {...result,sessions:result.sessions.map(w=>({...w,available:6}))};});
+ show();await screen.findByLabelText('Schedule date');await ready();
+ fireEvent.click(screen.getByRole('switch',{name:'Program A \u00b7 Group stage'}));
+ expect((screen.getByLabelText('Session 1 Program A matches') as HTMLInputElement).value).toBe('6');
+ expect(screen.getByText(/Match capacity for this session:/).textContent).toContain('16 matches');
+ fireEvent.keyDown(screen.getByLabelText('Session 1 Program A matches'),{key:'ArrowUp'});
+ expect(screen.getByRole('dialog').textContent).toContain('6 additional matches');
+});
+
+
+test('stage progress counts saved and previewed slots against all playable stage matches',async()=>{
+ const rows=Array.from({length:22},(_,i)=>match('m'+(100+i),'a',i<2?'2026-10-27T10:00:00':null));
+ view.plans[0].matches=[...rows,{...match('m200','a'),status:'BY'},{...match('m201','a','2026-10-27T10:00:00'),phase:'K',round:2}];
+ view.eventPlan.sessions[0].matchIds=rows.map(m=>m.id);view.eventPlan.sessions[0].programLimits={a:2};
+ const proposed=rows.slice(2,4).map(m=>({...m,start:'2026-10-27T11:00:00',end:'2026-10-27T11:40:00',court:2}));
+ service.api.mockImplementation(async(path:string)=>path.startsWith('tournament/')?structuredClone(view):{token:'t',revision:8,matches:proposed,unplaced:[{id:rows[4].id,number:rows[4].number,programId:'a'}],kept:2,sessions:[]});
+ show();await screen.findByLabelText('Schedule date');await ready();
+ fireEvent.click(screen.getByRole('button',{name:'Preview Schedule'}));
+ expect(await screen.findByText('Program A \u00b7 Group stage \u2014 18/22 matches unscheduled')).toBeTruthy();
+ expect(document.querySelector('details')).toBeNull();
+});
+
+
+test('two session summaries share the stage total and remaining count reflects the whole preview',async()=>{
+ const rows=Array.from({length:24},(_,i)=>match('m'+(100+i),'a'));
+ view.plans[0].matches=[...rows,{...match('m200','a'),status:'BY'}];
+ view.eventPlan.sessions=[{date:'2026-10-27',start:'17:00:00',end:'18:00:00',courts:[1,2,3,4],matchIds:rows.map(m=>m.id),programLimits:{a:4}},{date:'2026-10-27',start:'19:00:00',end:'20:00:00',courts:[1,2,3,4],matchIds:rows.map(m=>m.id),programLimits:{a:4}}];
+ const proposed=rows.slice(0,8).map((m,i)=>({...m,start:'2026-10-27T'+(i<4?'17':'19')+':00:00',end:'2026-10-27T'+(i<4?'17':'19')+':40:00',court:i%4+1}));
+ service.api.mockImplementation(async(path:string)=>path.startsWith('tournament/')?structuredClone(view):{token:'t',revision:8,matches:proposed,unplaced:rows.slice(8).map(m=>({id:m.id,number:m.number,programId:'a'})),kept:0,sessions:view.eventPlan.sessions.map((w,index)=>({...w,index,capacity:4,programs:[{programId:'a',requested:4,scheduled:4}]}))});
+ show();await screen.findByLabelText('Schedule date');await ready();
+ fireEvent.click(screen.getByRole('button',{name:'Preview Schedule'}));
+ expect(await screen.findByText('Program A \u00b7 Group stage \u2014 16/24 matches unscheduled')).toBeTruthy();
+ const ratios=screen.getAllByText('4/24');expect(ratios).toHaveLength(2);
+ expect(ratios[0].closest('p')?.textContent).toBe('27/10/2026 17:00\u201318:00 \u00b7 Program A: 4/24 requested matches scheduled');
+ expect(ratios[1].closest('p')?.textContent).toBe('27/10/2026 19:00\u201320:00 \u00b7 Program A: 4/24 requested matches scheduled');
 });

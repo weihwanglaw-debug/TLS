@@ -24,7 +24,7 @@ public static class EventDates
         var plan=s.EventPlans.SingleOrDefault(p=>p.EventId==request.EventId);
         if(plan is not null)
         {
-            if(existing.StartDate!=request.StartDate||existing.EndDate!=request.EndDate){plan.DailySessions=[];plan.Sessions=[];plan.ScheduleDays=[];}
+            if(existing.StartDate!=request.StartDate||existing.EndDate!=request.EndDate){plan.DailySessions=[];plan.Sessions=[];plan.ScheduleDays=[];plan.PlanningDraft=null;if(plan.SchedulePlanner is {} planner){planner.Draft=null;planner.Bookings=[];}}
             TournamentRules.ValidateEvent(s,plan);
         }
     }

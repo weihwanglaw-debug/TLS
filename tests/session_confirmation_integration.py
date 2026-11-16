@@ -60,6 +60,15 @@ try:
  validate([{**target,'programLimits':{pid:0}}],400,index=0);check(state()==snap)
  validate([{**target,'programLimits':{pid:len(ids)+1}}],400,index=0);check(state()==snap)
  validate([target],400,index=-1);validate([target],400,index=1);check(state()==snap)
+ # An unfinished overlapping/reversed/past second card cannot block saving the first card.
+ unfinished=window(today,'22:00:00','21:00:00')
+ draft=call('scheduling/draft',{'revision':rev(),'eventId':eid,'sessions':[target,unfinished],'sessionIndex':0,'dirtySessions':[1],'moveMatchIds':[]})
+ savedDraft=view()['eventPlan']['planningDraft'];check(savedDraft['dirtySessions']==[1]);check(savedDraft['sessions'][1]==unfinished)
+ check(all(not m.get('start') for plan in view()['plans'] for m in plan['matches']))
+ validate([target,unfinished],400,index=1)
+ overlap={**target,'start':'11:00:00','end':'13:00:00'}
+ call('scheduling/draft',{'revision':rev(),'eventId':eid,'sessions':[target,overlap],'sessionIndex':1,'dirtySessions':[],'moveMatchIds':[]},400)
+ check(view()['eventPlan']['planningDraft']==savedDraft)
  # A saved planning draft survives server restart and never publishes slots.
  draft_body={'revision':rev(),'eventId':eid,'sessions':[target],'sessionIndex':0,'dirtySessions':[],'moveMatchIds':[]}
  saved=call('scheduling/draft',draft_body);check(saved['revision']>draft_body['revision'])

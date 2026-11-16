@@ -3,3 +3,4 @@
 .display-score-labels{display:flex;align-items:center;gap:.45em;font-size:1em;color:#aebdd0}.display-score-labels>span{flex:1;font-size:.4em}.display-score-labels>i{width:.4em}.display-score-labels>small{font-size:.4em;min-width:2.44em;text-align:center}.display-score-labels>small:last-child{min-width:5.63em;text-align:right}.display-previous{min-width:1.5em;text-align:center}
 
 .display-card{line-height:1.1}.display-card p{margin:0}.display-current{line-height:1}.display-card-heading>span{line-height:1.15}
+.display-finished{border-color:#899675}.display-finished .display-card-heading>span,.display-winner>strong{color:#ffd579}.display-winner-label{display:inline-block;margin-left:.6em;font-size:.55em;white-space:nowrap}.display-finished .display-score-labels>small:last-child{min-width:2.44em;text-align:center}

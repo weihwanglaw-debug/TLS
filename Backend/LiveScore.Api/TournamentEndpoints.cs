@@ -26,10 +26,12 @@ public static class TournamentEndpoints
             var count=0;var s=store.Change(request.Revision,"APPLY_DRAW_SETTINGS",s=>count=DrawBatch.Apply(s,request),db=>db.EventImports.Single(x=>x.EventId==request.EventId).Stage="F");
             return new{revision=s.Revision,count};
         });
+        group.MapPut("/event-settings", (EventSettingsRequest request, TrsPublication publisher) => publisher.SaveEvent(request));
         group.MapPut("/event-dates",(EventDatesRequest request,SetupStore store)=>View(store.Change(request.Revision,"EVENT_DATES",s=>EventDates.Update(s,request),auditView:s=>s.Events.Where(e=>e.Id==request.EventId).ToArray()),request.EventId));
         group.MapPut("/event",(PlanRequest request,SetupStore store)=>View(store.Change(request.Revision,"EVENT_PLAN",s=>
         {
             request.Plan.PlanningDraft=TournamentRules.Event(s,request.Plan.EventId).PlanningDraft;
+            request.Plan.SchedulePlanner=TournamentRules.Event(s,request.Plan.EventId).SchedulePlanner;
             request.Plan.Publication=TournamentRules.Event(s,request.Plan.EventId).Publication;
             BusinessIds.Officials(s,request.Plan);
             TournamentRules.ValidateEvent(s,request.Plan);
@@ -68,7 +70,17 @@ public static class TournamentEndpoints
                 additions.AddRange(matches);changed.Add(pp);
             }
             TournamentRules.Need(additions.Count<=2000,"Generate fewer programs at a time (maximum 2000 new matches).");
-            if(!request.DrawOnly)TournamentScheduler.Schedule(s,plan,additions,request);
+            if(!request.DrawOnly)
+            {
+                // Existing clients can generate-and-schedule; reserved future slots take precedence.
+                foreach(var rows in additions.GroupBy(m=>(m.ProgramId,m.Phase,m.Round)))
+                foreach(var (m,index) in rows.OrderBy(m=>m.Number).Select((m,i)=>(m,i)))
+                {
+                    var reserved=plan.SchedulePlanner?.Bookings.SingleOrDefault(b=>b.SlotId==SchedulePlanner.Key(m.ProgramId,m.Phase,m.Round,index));
+                    if(reserved is not null&&m.Status!=MatchStatus.Bye){m.Start=reserved.Start;m.End=reserved.Start.AddMinutes(reserved.Minutes);m.Court=reserved.Court;m.DurationMinutes=reserved.Minutes;}
+                }
+                TournamentScheduler.Schedule(s,plan,additions.Where(m=>!FixtureResets.Slotted(m)).ToList(),request);
+            }
             GamePresets.ApplyDefault(s,additions);
             foreach(var pp in changed)pp.Matches.AddRange(additions.Where(m=>m.ProgramId==pp.ProgramId));
             foreach(var item in Previews.Where(x=>x.Value.Expires<DateTimeOffset.UtcNow))Previews.TryRemove(item.Key,out _);
@@ -198,7 +210,7 @@ public static class TournamentEndpoints
         {
             string eventId="";var s=store.Change(request.Revision,"MATCH_SCHEDULE",s=>
             {
-                var m=TournamentScheduler.Matches(s).SingleOrDefault(m=>m.Id==request.MatchId);TournamentRules.Need(m is not null&&m.Status=="SC","Only unplayed matches can be rescheduled.");
+                var m=TournamentScheduler.Matches(s).SingleOrDefault(m=>m.Id==request.MatchId);TournamentRules.Need(m is not null&&m.Status=="SC"&&!FixtureResets.StartedOrScored(m),"Only unplayed matches can be rescheduled.");
                 TournamentRules.Need(!s.Venue.Bindings.Any(b=>b.MatchId==m!.Id),"Release the dashboard assignment before rescheduling this match.");
                 TournamentRules.Need(request.Start.Kind==DateTimeKind.Unspecified,"Enter start as local venue time without a UTC offset.");eventId=s.Programs.Single(p=>p.Id==m!.ProgramId).EventId;m!.ReviewAvailable=request.ReviewAvailable??(m.Court==request.Court&&m.ReviewAvailable);m.Court=request.Court;m.Start=request.Start;m.End=request.Start.AddMinutes(m.DurationMinutes);m.UmpireId=request.UmpireId;m.ServiceJudgeId=request.ServiceJudgeId;m.LineJudgeIds=request.LineJudgeIds??[];
                 TournamentScheduler.ValidateOverride(s,m);
@@ -213,17 +225,19 @@ public static class TournamentEndpoints
                 var m=plan.Matches.Single(m=>m.Id==request.MatchId);eventId=s.Programs.Single(p=>p.Id==m.ProgramId).EventId;
                 TournamentRules.Need(m.Status is MatchStatus.Completed or MatchStatus.Walkover,"Only a completed result can be cleared.");
                 if(m.MatchVersion!=request.MatchVersion)throw new RuleException("The result changed. Refresh before clearing it.",409);
-                TournamentRules.Need(m.Phase=="G"?!plan.Matches.Any(x=>x.Phase=="K"):!plan.Matches.Any(x=>x.Phase=="K"&&x.Round>m.Round),"A dependent round exists. Reset the unplayed latest round first.");
                 TournamentRules.Need(!string.IsNullOrWhiteSpace(request.Reason)&&request.Reason.Length<=300,"Provide a reason for clearing the result.");
-                m.Live??=new();m.Live.Corrections.Add(new(DateTimeOffset.UtcNow,request.Reason,m.Games.ToList(),m.WinnerId,ResultValidation.Copy(m.ResultDetails)));
-                m.Status=MatchStatus.Scheduled;m.WinnerId=null;m.Games=[];m.ActualFinishedAt=null;m.Live.Details=new();m.Live.A=0;m.Live.B=0;m.Live.StartedAtUtc=null;m.Live.StartedLocal=null;m.Live.SubmittedAtUtc=null;m.Live.AwaitingNextGame=false;m.Live.PaperMode=false;m.Live.History.Clear();m.Live.Receipts.Clear();m.Live.Version++;m.Live.ResultSource="";m.Live.Serving=null;m.Live.Rallies.Clear();m.Live.RallyHistoryComplete=false;m.Live.IntervalUntil=null;
-                plan.Phase=m.Phase;s.Venue.Bindings.RemoveAll(b=>b.MatchId==m.Id);
-            });return View(s,eventId);
+                var removed=FixtureResets.RemoveDependents(s,plan,[m]);
+                FixtureResets.ResetResult(s,m);
+                plan.RankingDecisions.RemoveAll(d=>d.GroupId==m.GroupId);
+                plan.OfficialDecisions.RemoveAll(d=>d.MatchId==m.Id);
+                FixtureResets.CleanPlanning(s,TournamentRules.Event(s,eventId),removed);
+                FixtureResets.RefreshPhase(plan);
+            },auditView:s=>new{request.MatchId,request.Reason,status=TournamentScheduler.Matches(s).FirstOrDefault(m=>m.Id==request.MatchId)?.Status});return View(s,eventId);
         });
         group.MapGet("/{eventId}/reset-schedule",(string eventId,SetupStore store)=>FixtureResets.List(store.Read(),eventId));
         group.MapPost("/reset-schedule",(ResetScheduleRequest request,SetupStore store)=>
         {
-            var s=store.Change(request.Revision,"RESET_SCHEDULE",s=>FixtureResets.ResetSchedule(s,request));return View(s,request.EventId);
+            var s=store.Change(request.Revision,"RESET_SCHEDULE",s=>FixtureResets.ResetSchedule(s,request),auditView:s=>new{request.EventId,request.RoundKeys,matchCount=TournamentScheduler.Matches(s).Count(m=>s.Programs.Any(p=>p.Id==m.ProgramId&&p.EventId==request.EventId))});return View(s,request.EventId);
         });
         group.MapPost("/reset-seeding",(ResetRequest request,SetupStore store)=>
         {
@@ -235,11 +249,13 @@ public static class TournamentEndpoints
             var s=store.Change(request.Revision,"RESET_LATEST_ROUND",s=>
             {
                 var plan=TournamentRules.Program(s,request.ProgramId);var latest=plan.Matches.Where(m=>m.Phase=="K"&&m.Round==plan.LastRound).ToList();
-                TournamentRules.Need(latest.Count>0&&latest.All(m=>m.Status is MatchStatus.Scheduled or MatchStatus.Bye)&&!latest.Any(m=>GamePresets.Locked(m)),"Only an entirely unplayed latest knockout round can be reset.");
+                TournamentRules.Need(latest.Count>0&&latest.All(m=>m.Status is MatchStatus.Scheduled or MatchStatus.Bye)&&!latest.Any(FixtureResets.StartedOrScored),"Clear results and finish or cancel active matches before resetting the latest knockout round.");
                 TournamentRules.Need(!s.Venue.Bindings.Any(b=>latest.Any(m=>m.Id==b.MatchId)),"Release waiting tablet assignments before resetting the round.");
                 FixtureResets.RequireScheduleReset(s,eventId,latest);
+                FixtureResets.CleanPlanning(s,TournamentRules.Event(s,eventId),latest.Select(m=>m.Id).ToHashSet());
+                plan.OfficialDecisions.RemoveAll(d=>latest.Any(m=>m.Id==d.MatchId));
                 plan.Matches.RemoveAll(m=>latest.Contains(m));plan.LastRound=plan.Matches.Where(m=>m.Phase=="K").Select(m=>m.Round).DefaultIfEmpty(0).Max();plan.Phase=plan.LastRound>0?"K":plan.Format=="GK"?"G":"P";
-                if(plan.Matches.Count==0)plan.Groups=[];TournamentRules.Save(s.ProgramPlans,plan,p=>p.ProgramId);
+                if(plan.LastRound==0)plan.QualificationOrigins.Clear();if(plan.Matches.Count==0)plan.Groups=[];TournamentRules.Save(s.ProgramPlans,plan,p=>p.ProgramId);
             },db=>
             {
                 var rows=db.ProgramOperations.ToList().Select(x=>JsonSerializer.Deserialize<ProgramPlan>(x.Json,JsonDefaults.Options)!);
@@ -251,7 +267,7 @@ public static class TournamentEndpoints
             var eventId=store.Read().Programs.Single(p=>p.Id==request.ProgramId).EventId;
             var s=store.Change(request.Revision,"RESET_DRAW",s=>
             {
-                var p=TournamentRules.Program(s,request.ProgramId);TournamentRules.Need(p.Matches.All(m=>m.Status is "SC" or "BY")&&!p.Matches.Any(m=>GamePresets.Locked(m)),"Cannot reset a draw after results have been entered.");FixtureResets.RequireScheduleReset(s,eventId,p.Matches);p.Matches=[];p.Groups=[];p.Phase="P";p.LastRound=0;
+                var p=TournamentRules.Program(s,request.ProgramId);TournamentRules.Need(!p.Matches.Any(FixtureResets.StartedOrScored),"Clear results and finish or cancel active matches before resetting the draw.");FixtureResets.RequireScheduleReset(s,eventId,p.Matches);FixtureResets.CleanPlanning(s,TournamentRules.Event(s,eventId),p.Matches.Select(m=>m.Id).ToHashSet());p.RankingDecisions=[];p.OfficialDecisions=[];p.QualificationOrigins.Clear();p.Matches=[];p.Groups=[];p.Phase="P";p.LastRound=0;
                 TournamentRules.Save(s.ProgramPlans,p,x=>x.ProgramId);
                 if(!s.ProgramPlans.Any(pp=>s.Programs.Any(x=>x.Id==pp.ProgramId&&x.EventId==eventId)&&pp.Matches.Count>0))
                 {var index=s.Imports.FindIndex(i=>i.EventId==eventId);s.Imports[index]=s.Imports[index] with{Stage="P"};}
@@ -263,13 +279,14 @@ public static class TournamentEndpoints
             });return View(s,eventId);
         });
     }
-    private static object View(SetupData s,string eventId)
+    internal static object View(SetupData s,string eventId)
     {
         var ev=s.Events.SingleOrDefault(e=>e.Id==eventId);TournamentRules.Need(ev is not null,"Event not found.");
         var programIds=s.Programs.Where(p=>p.EventId==eventId).Select(p=>p.Id).ToHashSet();
         var plans=programIds.Select(id=>TournamentRules.Program(s,id)).ToList();
+        var publication=TournamentRules.Event(s,eventId).Publication;
         foreach(var p in plans)foreach(var m in p.Matches)m.PresetLocked=GamePresets.Locked(m);
-        return new{calledMatchIds=s.Venue.Bindings.Select(b=>b.MatchId).Where(id=>plans.Any(p=>p.Matches.Any(m=>m.Id==id))).ToArray(),datesEditable=EventDates.Editable(s,eventId),warnings=TournamentScheduler.Warnings(s,eventId),revision=s.Revision,timeZone=s.TimeZone,courtCount=s.CourtCount,closedCourts=s.Venue.ClosedCourts,progressionLocked=EventOperations.Started(s,eventId),eventInfo=ev,eventPlan=TournamentRules.Event(s,eventId),dailySessions=EventOperations.LegacyDaily(s,TournamentRules.Event(s,eventId)),eventCourts=EventOperations.Courts(s,TournamentRules.Event(s,eventId)),presets=s.Venue.Presets.Where(p=>p.Status=="A"),progress=plans.Select(p=>new{p.ProgramId,waiting=EventOperations.Waiting(s,p)}),programs=s.Programs.Where(p=>p.EventId==eventId),participants=s.Participants.Where(p=>p.EventId==eventId),entries=s.Entries.Where(e=>e.EventId==eventId),plans,
+        return new{resultsPublishingEnabled=publication.Enabled&&!string.IsNullOrWhiteSpace(publication.ResultsUrl)&&publication.ProtectedCredential.Length>0,calledMatchIds=s.Venue.Bindings.Select(b=>b.MatchId).Where(id=>plans.Any(p=>p.Matches.Any(m=>m.Id==id))).ToArray(),datesEditable=EventDates.Editable(s,eventId),warnings=TournamentScheduler.Warnings(s,eventId),revision=s.Revision,timeZone=s.TimeZone,courtCount=s.CourtCount,closedCourts=s.Venue.ClosedCourts,progressionLocked=EventOperations.Started(s,eventId),eventInfo=ev,eventPlan=TournamentRules.Event(s,eventId),dailySessions=EventOperations.LegacyDaily(s,TournamentRules.Event(s,eventId)),eventCourts=EventOperations.Courts(s,TournamentRules.Event(s,eventId)),presets=s.Venue.Presets.Where(p=>p.Status=="A"),progress=plans.Select(p=>new{p.ProgramId,waiting=EventOperations.Waiting(s,p)}),programs=s.Programs.Where(p=>p.EventId==eventId),participants=s.Participants.Where(p=>p.EventId==eventId),entries=s.Entries.Where(e=>e.EventId==eventId),plans,
             standings=plans.SelectMany(p=>p.Groups.Select(g=>new{p.ProgramId,groupId=g.Id,rows=TournamentRules.Standings(p,g),pending=BadmintonStandings.Pending(p,g)}))};
     }
 }

@@ -8,6 +8,7 @@ public static class MatchStatus
 }
 public sealed class LiveVenue
 {
+    public TrsConnectionSettings? TrsConnection {get;set;}
     public LiveDisplaySettings Display {get;set;}=new();
     public List<GamePreset> Presets {get;set;}=[];
     public List<int> ClosedCourts {get;set;}=[];
@@ -89,6 +90,8 @@ public sealed record SavedLiveMatch(LiveMatchState State,List<GameScore> Games,s
 
 public sealed class LiveDisplaySettings
 {
+    public bool SupportsLayout() => (Rows, Columns) is (1, 2) or (2, 2) or (2, 3) or (2, 4) or (3, 4) or (4, 4);
+    public LiveDisplaySettings ForScreen() => new() { Rows=SupportsLayout()?Rows:2, Columns=SupportsLayout()?Columns:3, PageSeconds=PageSeconds };
     public int Columns {get;set;}=3;
     public int Rows {get;set;}=2;
     public int PageSeconds {get;set;}=10;

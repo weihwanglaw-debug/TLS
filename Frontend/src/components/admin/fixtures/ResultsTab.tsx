@@ -1,3 +1,4 @@
+import {audienceScheduleHtml} from '@/lib/fixturePrint';
 import ScoresheetButton from '@/ScoresheetButton';
 import DatePicker from '@/DatePicker';
 /**
@@ -25,6 +26,7 @@ interface ScheduleFields {
 interface Props {
   hideExport?:boolean;
   onExportReady?:(run:()=>void)=>void;
+  onPrintReady?:(render:()=>string)=>void;
   bracketState: BracketState;
   eventName: string;
   programName: string;
@@ -255,7 +257,18 @@ function ResultRow({
   );
 }
 
-export function ResultsTab({ bracketState, eventName, programName, onOpenScore, onUpdateSchedule, readOnly, onOpenSchedule, onClear, onPreset,hideExport=false,onExportReady }: Props) {
+function orderByStart(matches: MatchEntry[]) {
+  const key = (match: MatchEntry) => match.matchDate && match.startTime
+    ? `${match.matchDate}T${match.startTime.length === 5 ? match.startTime + ":00" : match.startTime}`
+    : "";
+  return [...matches].sort((a, b) => {
+    const first = key(a), second = key(b);
+    if (!first || !second) return first ? -1 : second ? 1 : 0;
+    return first.localeCompare(second);
+  });
+}
+
+export function ResultsTab({ bracketState, eventName, programName, onOpenScore, onUpdateSchedule, readOnly, onOpenSchedule, onClear, onPreset,hideExport=false,onExportReady,onPrintReady }: Props) {
   const all = getAllMatches(bracketState);
   const done = all.filter(isResolvedMatch);
   const isGroupStage = bracketState.phase === "group" && bracketState.groups.length > 0;
@@ -263,7 +276,7 @@ export function ResultsTab({ bracketState, eventName, programName, onOpenScore, 
   const groupSections = useMemo(() => bracketState.groups.map(group => ({
     key: group.id,
     label: group.name,
-    matches: group.matches,
+    matches: orderByStart(group.matches),
   })), [bracketState.groups]);
   const roundOptions = useMemo(() => {
     if (isGroupStage) return [{ key: "group-stage", label: "Group Stage" }];
@@ -286,10 +299,11 @@ export function ResultsTab({ bracketState, eventName, programName, onOpenScore, 
 
   const activeRoundKey = selectedRoundKey || latestRoundKey;
   const activeRoundLabel = roundOptions.find(option => option.key === activeRoundKey)?.label ?? "Round";
-  const visibleMatches = isGroupStage ? all : all.filter(match => roundKey(match) === activeRoundKey);
+  const visibleMatches = isGroupStage ? groupSections.flatMap(section => section.matches) : orderByStart(all.filter(match => roundKey(match) === activeRoundKey));
   const visibleDone = visibleMatches.filter(isResolvedMatch).length;
   const exportRound = () => exportFixtureRoundCsv(eventName, programName, activeRoundLabel, visibleMatches);
   useEffect(()=>{onExportReady?.(exportRound);},[activeRoundKey,bracketState]);
+  useEffect(()=>{onPrintReady?.(()=>audienceScheduleHtml(programName,visibleMatches,Object.fromEntries(bracketState.groups.map(g=>[g.id,g.name]))));},[activeRoundKey,bracketState,programName,onPrintReady]);
   const renderTable = (matches: MatchEntry[]) => (
     <div className="overflow-x-auto">
       <table className="trs-table">

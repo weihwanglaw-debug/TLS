@@ -39,11 +39,11 @@ try:
  def draw(pid):
   p=mutate('tournament/preview',{'eventId':eid,'programIds':[pid],'courts':[],'drawOnly':True,'settings':{'format':'KO','groupCount':1,'advancePerGroup':1}});call('tournament/confirm',{'revision':p['revision'],'token':p['token']})
  for pid in pids:seeds(pid);draw(pid)
- check(view()['datesEditable']);check(view()['eventPlan']['matchMinutes']==40 and view()['eventPlan']['restMinutes']==120)
+ check(view()['datesEditable']);check(view()['eventPlan']['matchMinutes']==40 and view()['eventPlan']['restMinutes']==0)
  ep=view()['eventPlan'];ep['officials']=[{'id':eid+'-O001','name':'Umpire'}];mutate('tournament/event',{'plan':ep},method='PUT')
  def schedule():
   v=view();d=v['eventInfo']['startDate'];ids=[m['id'] for p in v['plans'] for m in p['matches'] if m['status']!='BY'];body={'eventId':eid,'matchMinutes':40,'restMinutes':120,'sessions':[{'date':d,'start':'10:00:00','end':'18:00:00','courts':[1,2],'matchIds':ids}],'days':[{'date':d,'courts':[1,2],'matchIds':ids}]}
-  p=mutate('scheduling/preview',body);check(len(p['matches'])==2);call('scheduling/confirm',{'revision':p['revision'],'token':p['token']})
+  p=mutate('scheduling/preview',body);check(len(p['matches'])==sum(m['status']=='SC' and m['start'] is None for plan in v['plans'] for m in plan['matches']));call('scheduling/confirm',{'revision':p['revision'],'token':p['token']})
  schedule();check(not view()['datesEditable']);before=view();keys=[key(pid) for pid in pids];seedsBefore=[copy.deepcopy(plan(pid)['seeds']) for pid in pids]
  for endpoint in ['reset','reset-latest-round','reset-seeding']:mutate('tournament/'+endpoint,{'programId':pids[0]},400)
  d=(date.fromisoformat(before['eventInfo']['startDate'])+timedelta(days=5)).isoformat()
@@ -59,16 +59,36 @@ try:
  # Step backwards through draw and seeding without touching participants.
  mutate('tournament/reset',{'programId':pids[0]});check(call('seeding/'+pids[0])['reviewed']);mutate('tournament/reset-seeding',{'programId':pids[0]});seed=call('seeding/'+pids[0]);check(not seed['reviewed'] and not any(seed['seeds'].values()))
  mutate('tournament/preview',{'eventId':eid,'programIds':[pids[0]],'courts':[],'drawOnly':True},400)
- other=copy.deepcopy(plan(pids[1]));mutate('tournament/event-dates',{'eventId':eid,'startDate':d,'endDate':d},method='PUT');check(plan(pids[1])==other);ep=view()['eventPlan'];check(not ep['sessions'] and not ep['dailySessions'] and not ep['scheduleDays']);check(ep['matchMinutes']==40 and ep['restMinutes']==120 and ep['officials'][0]['id']==eid+'-O001')
+ other=copy.deepcopy(plan(pids[1]));mutate('tournament/event-dates',{'eventId':eid,'startDate':d,'endDate':d},method='PUT');check(plan(pids[1])==other);ep=view()['eventPlan'];check(not ep['sessions'] and not ep['dailySessions'] and not ep['scheduleDays']);check(ep['matchMinutes']==40 and ep['restMinutes']==0 and ep['officials'][0]['id']==eid+'-O001')
  seeds(pids[0]);draw(pids[0]);schedule();keys=[key(pid) for pid in pids]
- # A waiting tablet binding blocks reset until release, without affecting another round.
+ # Reset releases a waiting tablet binding without affecting another round.
  m=plan(pids[0])['matches'][0];mutate('dashboard/pair',{'matchId':m['id'],'court':m['court'],'umpireId':eid+'-O001','presetId':preset,'reason':''})
- check(any(r['reason']=='Release waiting tablet assignments first' for r in call('tournament/'+eid+'/reset-schedule')['rounds']));reset([keys[0]],400)
- mutate('dashboard/cancel',{'court':m['court']});check(not next(r for r in call('tournament/'+eid+'/reset-schedule')['rounds'] if r['key']==keys[0])['reason'])
- # Recording a result in the other program blocks its entire round and makes a mixed batch atomic.
- m=plan(pids[1])['matches'][0];mutate('tournament/result',{'matchId':m['id'],'games':[{'a':5,'b':0}],'presetId':preset},method='PUT');before=view();reset(keys,400);check(view()==before);check(not view()['datesEditable']);mutate('tournament/reset',{'programId':pids[1]},400)
+ check(all(not r['reason'] for r in call('tournament/'+eid+'/reset-schedule')['rounds']));reset([keys[0]])
+ check(not any(b['matchId']==m['id'] for b in state()['venue']['bindings']));check(not next(r for r in call('tournament/'+eid+'/reset-schedule')['rounds'] if r['key']==keys[0])['reason'])
+ # Invalid mixed batches remain atomic; completed results in unrelated rounds are preserved.
+ m=plan(pids[1])['matches'][0];mutate('tournament/result',{'matchId':m['id'],'matchVersion':m['matchVersion'],'games':[{'a':5,'b':0}],'presetId':preset},method='PUT');before=view();reset([keys[0],'missing'],400);check(view()==before);check(not view()['datesEditable']);mutate('tournament/reset',{'programId':pids[1]},400)
  played=copy.deepcopy(plan(pids[1]));reset([keys[0]]);check(plan(pids[1])==played);check(not view()['datesEditable'])
  snapshot=view();process.terminate();process.wait(timeout=10);process=None;start();check(view()==snapshot);check({k:state()[k] for k in original}==original)
+ # Cleared result history must not strand the reset/delete workflow, including after restart.
+ m=plan(pids[1])['matches'][0]
+ mutate('tournament/clear-result',{'matchId':m['id'],'matchVersion':m['matchVersion'],'reason':'Incorrect test result cleared'})
+ check(not next(r for r in call('tournament/'+eid+'/reset-schedule')['rounds'] if r['key']==keys[1])['reason'])
+ snapshot=view();process.terminate();process.wait(timeout=10);process=None;start();check(view()==snapshot)
+ reset([keys[1]])
+ mutate('tournament/reset-latest-round',{'programId':pids[1]});check(not plan(pids[1])['matches'])
+ # Whole-draw reset uses the same current-result protection.
+ draw(pids[1]);schedule();m=plan(pids[1])['matches'][0]
+ mutate('tournament/result',{'matchId':m['id'],'matchVersion':m['matchVersion'],'games':[{'a':5,'b':0}],'presetId':preset},method='PUT')
+ m=plan(pids[1])['matches'][0]
+ mutate('tournament/clear-result',{'matchId':m['id'],'matchVersion':m['matchVersion'],'reason':'Clear before draw reset'})
+ reset([key(pids[1])]);mutate('tournament/reset',{'programId':pids[1]});check(not plan(pids[1])['matches'])
+ # Whole schedule reset clears a completed result directly, without individual clearing.
+ draw(pids[1]);schedule();m=plan(pids[1])['matches'][0]
+ mutate('tournament/result',{'matchId':m['id'],'matchVersion':m['matchVersion'],'games':[{'a':5,'b':0}],'presetId':preset},method='PUT')
+ reset([key(pid) for pid in pids]);fresh=plan(pids[1])['matches'][0]
+ check(fresh['status']=='SC' and not fresh['games'] and fresh['winnerId'] is None and fresh['actualStartedAt'] is None and fresh['court'] is None)
+ reset([key(pids[1])]);check(view()['datesEditable'])
+ check({k:state()[k] for k in original}==original)
  print(f'PASS: {checks} reset checks: backward order, selective/atomic reset, history/binding/stale guards, postponement preserving draws, timing defaults and SQL restart.')
 finally:
  if process:process.terminate();process.wait(timeout=10)

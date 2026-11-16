@@ -13,10 +13,10 @@ const saved={...initial,data:{...initial.data,revision:4,events:[{id:'e',name:'B
 const preview={...saved,token:'validated-token',revision:3,replacing:false} as Preview;
 const done=vi.fn();
 const upload=(size=20)=>fireEvent.change(screen.getByLabelText('Excel workbook'),{target:{files:[new File([new Uint8Array(size)],'badminton-test.xlsx')]}});
-function Harness({replaceId=''}:{replaceId?:string}){
+function Harness({replaceId='',kind='excel'}:{replaceId?:string;kind?:'excel'|'trs'}){
  const [busy,setBusy]=useState(false),[error,setError]=useState('');
  async function work(action:()=>Promise<void>){setBusy(true);setError('');try{await action();}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
- return <><ActionMessage message={error}/><EventImport view={initial} kind="excel" replaceId={replaceId} busy={busy} work={work} onDone={done} onBack={()=>{}}/></>;
+ return <><ActionMessage message={error}/><EventImport view={initial} kind={kind} replaceId={replaceId} busy={busy} work={work} onDone={done} onBack={()=>{}}/></>;
 }
 beforeEach(()=>{vi.resetAllMocks();vi.stubGlobal('fetch',vi.fn().mockResolvedValue({ok:true,json:async()=>preview}));service.api.mockResolvedValue(saved);});
 afterEach(()=>{cleanup();vi.unstubAllGlobals();});
@@ -63,11 +63,35 @@ test('repeated clicks cannot start another import while validation or save is pe
  expect((processing as HTMLButtonElement).disabled).toBe(true);expect((screen.getByLabelText('Excel workbook') as HTMLInputElement).disabled).toBe(true);expect(fetch).toHaveBeenCalledTimes(1);
  finishValidation({ok:true,json:async()=>preview});await waitFor(()=>expect(service.api).toHaveBeenCalledOnce());fireEvent.click(processing);expect(service.api).toHaveBeenCalledOnce();finishSave(saved);await waitFor(()=>expect(done).toHaveBeenCalledOnce());
 });
-test('replacement retains explicit review and acknowledgement before saving',async()=>{
+test('replacement retains review and confirms without an acknowledgement checkbox',async()=>{
  vi.mocked(fetch).mockResolvedValue({ok:true,json:async()=>({...preview,replacing:true})} as Response);
  render(<Harness replaceId="e"/>);upload();fireEvent.click(screen.getByRole('button',{name:'Validate and Review'}));
  await screen.findByText('Review Event Before Import');expect(service.api).not.toHaveBeenCalled();expect(done).not.toHaveBeenCalled();
- expect((screen.getByRole('button',{name:'Confirm Replacement'}) as HTMLButtonElement).disabled).toBe(true);
- fireEvent.click(screen.getByRole('switch'));fireEvent.click(screen.getByRole('button',{name:'Confirm Replacement'}));await waitFor(()=>expect(done).toHaveBeenCalledWith(saved,'e'));
+ expect(screen.queryByRole('switch')).toBeNull();expect((screen.getByRole('button',{name:'Confirm'}) as HTMLButtonElement).disabled).toBe(false);
+ fireEvent.click(screen.getByRole('button',{name:'Confirm'}));await waitFor(()=>expect(done).toHaveBeenCalledWith(saved,'e'));
  expect(fetch).toHaveBeenCalledWith('/api/setup/preview?kind=excel&revision=3&replaceEventId=e',expect.anything());
+});
+
+
+test('TRS loading failures show the server message instead of an empty event list',async()=>{
+ service.api.mockRejectedValue(new Error('The integration key is invalid.'));
+ render(<Harness kind="trs"/>);
+ expect(await screen.findByRole('alert')).toHaveProperty('textContent','The integration key is invalid.');
+ expect(screen.queryByText('No events found in TRS.')).toBeNull();
+});
+
+test('a successful empty TRS response reports no events and removes the helper banner',async()=>{
+ service.api.mockResolvedValue([]);render(<Harness kind="trs"/>);
+ expect(await screen.findByText('No events found in TRS.')).toBeTruthy();
+ expect(screen.queryByText(/Select an event supplied by TRS/)).toBeNull();
+});
+
+test('TRS event review has one Confirm button with no acknowledgement step',async()=>{
+ const transfer={...saved.data,sourceSystemId:'TRS',sourceTimeZone:'Asia/Singapore',registrationClosed:true,hasFixtures:false,
+  events:[{id:'e',name:'Open',endDate:'2099-12-01',status:'A'}],programs:[{id:'p',status:'A',sport:'Badminton',entryType:'S',minCapacity:2,minPlayers:1}],entries:[{programId:'p',status:'A',participantIds:['a']},{programId:'p',status:'A',participantIds:['b']}]};
+ service.api.mockImplementation(async(path:string)=>path==='trs/events'?[transfer]:saved);
+ render(<Harness kind="trs"/>);fireEvent.click(await screen.findByRole('button',{name:'Select Event'}));
+ const confirm=await screen.findByRole('button',{name:'Confirm'});expect(screen.queryByRole('switch')).toBeNull();
+ expect(screen.queryByText(/I have checked the event/)).toBeNull();fireEvent.click(confirm);
+ await waitFor(()=>expect(done).toHaveBeenCalledWith(saved,'e'));
 });

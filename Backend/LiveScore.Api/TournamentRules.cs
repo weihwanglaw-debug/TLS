@@ -24,6 +24,7 @@ public static class TournamentRules
         Need(!string.IsNullOrWhiteSpace(r.Name)&&r.Name.Length<=100,"Name the scoring profile (maximum 100 characters).");
         Need(r.GamesToWin is >=1 and <=3&&r.PointsToWin is >=5 and <=50&&r.WinBy is >=1 and <=5&&r.PointCap>=r.PointsToWin&&r.PointCap<=99,"Invalid game, point, winning-margin or cap settings.");
         Need(r.IntervalAt>=1&&r.IntervalAt<r.PointsToWin&&r.DecidingEndsAt>=1&&r.DecidingEndsAt<r.PointsToWin,"Interval/end-change score must be below the winning score.");
+        Need(r.WarmupSeconds is >=0 and <=600,"Warm-up duration must be 0–600 seconds.");
         Need(r.IntervalSeconds is >=0 and <=600&&r.BetweenGamesSeconds is >=0 and <=600&&r.ChallengesPerGame is >=1 and <=5,"Invalid interval duration or challenge allowance.");
     }
     public static void ValidateEvent(SetupData data,EventPlan plan)
@@ -99,7 +100,7 @@ public static class TournamentRules
         Need(values.All(x=>x>=1&&x<=ids.Count)&&values.Distinct().Count()==values.Count,"Seeds must be unique numbers between 1 and the entry count.");
         plan.Seeds=request.Seeds;plan.SeedCount=values.DefaultIfEmpty(0).Max();plan.SeedsReviewed=true;Save(data.ProgramPlans,plan,x=>x.ProgramId);
     }
-    private static int[] SeedLine(int size)
+    internal static int[] SeedLine(int size)
     {
         if(size==1)return [1];if(size==2)return [1,2];if(size==4)return [1,4,3,2];
         return SeedLine(size/2).SelectMany(s=>new[]{s,size+1-s}).ToArray();

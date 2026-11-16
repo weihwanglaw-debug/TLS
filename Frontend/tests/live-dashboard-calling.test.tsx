@@ -21,7 +21,7 @@ test('court card calls its next match with the court preselected and no override
  const dialog=screen.getByRole('dialog',{name:'Assign Court / Tablet'});
  expect(within(dialog).getByLabelText('Assigned court').textContent).toBe('Court 2');
  expect(within(dialog).queryByLabelText('Assign court')).toBeNull();
- expect(within(dialog).getByText('#2 · Player A m2 vs Player B m2')).toBeTruthy();
+ expect(within(dialog).getByText('Match #2')).toBeTruthy();expect(within(dialog).getByText('Player A m2')).toBeTruthy();expect(within(dialog).getByText('Player B m2')).toBeTruthy();
  expect(within(dialog).queryByLabelText('Assignment reason')).toBeNull();
  expect(within(dialog).queryByText(/Override a waiting/)).toBeNull();
  fireEvent.click(within(dialog).getByRole('button',{name:'Assign & Generate Code'}));
@@ -126,4 +126,17 @@ test('no eligible session courts prevents assignment even when courts are free',
  show();const buttons=await screen.findAllByRole('button',{name:'Assign to Court'});
  expect(buttons.every(b=>(b as HTMLButtonElement).disabled)).toBe(true);
  expect(screen.queryByRole('button',{name:/Call Next Match/})).toBeNull();
+});
+
+test.each(['F','D','N'] as const)('same-day calling remains available with session state %s and no start estimate',async sessionState=>{
+ Object.assign(data.eventContext!,{sessionState,missingSessions:sessionState==='N',nextSession:null});
+ data.queue.forEach(q=>{q.estimatedStart=null;q.waitingFor='No session-based start estimate';});
+ show();
+ const call=await screen.findByRole('button',{name:'Call Next Match on Court 1'});
+ expect((call as HTMLButtonElement).disabled).toBe(false);
+ expect(screen.getByText(/Matches scheduled for today may still start|matches scheduled for today may still start/)).toBeTruthy();
+ expect(screen.getAllByText('No session-based start estimate').length).toBeGreaterThan(0);
+ expect(screen.queryByRole('button',{name:'Call Next Match on Court 4'})).toBeNull();
+ fireEvent.click(call);
+ expect(screen.getByRole('dialog',{name:'Assign Court / Tablet'})).toBeTruthy();
 });

@@ -14,7 +14,7 @@ public sealed record MatchPresetRequest(long Revision,string MatchId,string Pres
 public static class GamePresets
 {
     public static BadmintonRules Copy(BadmintonRules rules)=>JsonSerializer.Deserialize<BadmintonRules>(JsonSerializer.Serialize(rules,JsonDefaults.Options),JsonDefaults.Options)!;
-    public static bool Locked(TournamentMatch match)=>match.Status is not (MatchStatus.Scheduled or MatchStatus.Bye)||match.Live?.StartedAtUtc is not null||match.ActualStartedAt.HasValue||match.ActualFinishedAt.HasValue||match.Games.Count>0||match.Live?.Corrections.Count>0;
+    public static bool Locked(TournamentMatch match)=>FixtureResets.StartedOrScored(match);
     public static GamePreset? Default(SetupData s)=>s.Venue.Presets.SingleOrDefault(p=>p.IsDefault&&p.Status=="A");
     public static void ApplyDefault(SetupData s,IEnumerable<TournamentMatch> matches)
     {

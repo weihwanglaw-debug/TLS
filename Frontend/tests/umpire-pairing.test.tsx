@@ -24,7 +24,7 @@ test('a valid scan opens the assigned scoreboard and keeps the returned session'
  const view={sessionId:'session-test',serverTime:new Date().toISOString(),heartbeatSeconds:5,match:{id:'assigned',court:2,number:3,programName:"Men's Singles",roundLabel:'Quarterfinals',status:'SC',rules:{gamesToWin:2,pointsToWin:21},games:[],players:[],serving:null,scoreA:0,scoreB:0}};
  service.liveApi.mockImplementation(async(path:string)=>path==='tablet/pair'?{token:'new-session',match:view}:path==='tablet/state'?view:{});
  window.history.replaceState(null,'','/umpire#pair=ABCD1234');render(<UmpireApp/>);
- expect(await screen.findByRole('button',{name:'Set up & start match'})).toBeTruthy();
+ expect(await screen.findByRole('button',{name:'Start Warm-up'})).toBeTruthy();
  expect(screen.queryByRole('button',{name:'Connect Tablet'})).toBeNull();
  expect(JSON.parse(localStorage.getItem('tls-umpire-match')!).token).toBe('new-session');
  expect(window.location.pathname).toBe('/umpire/session-test');expect(window.location.href).not.toContain('new-session');
@@ -33,7 +33,7 @@ test('a valid scan opens the assigned scoreboard and keeps the returned session'
 test('scanning cannot discard an unacknowledged scoring action',async()=>{
  localStorage.setItem('tls-umpire-match',JSON.stringify({token:'old',view:{sessionId:'session-old',match:{id:'old',rules:{},players:[],games:[],paperMode:true}},pending:{action:'POINT'}}));
  window.history.replaceState(null,'','/umpire#pair=ABCD1234');render(<UmpireApp/>);
- expect(await screen.findByText('Retry the pending scoring action before connecting to another match.')).toBeTruthy();
+ expect(await screen.findByText('Resume the pending match so TLS can finish saving before connecting to another match.')).toBeTruthy();
  expect(service.liveApi).not.toHaveBeenCalled();expect(window.location.hash).toBe('');
 });
 
@@ -51,10 +51,10 @@ test('early starts require a confirmation and retain setup selections',async()=>
  const view={sessionId:'session-test',serverTime:new Date().toISOString(),heartbeatSeconds:30,match:{id:'m',earlyStartMinutes:30,umpireName:'Jane',eventName:'Event',court:1,number:1,status:'SC',version:1,rules:{gamesToWin:2,pointsToWin:21,countShuttles:true},games:[],players:[{id:'a',name:'Alice',side:'A'},{id:'b',name:'Bob',side:'B'}],serving:null,scoreA:0,scoreB:0}};
  localStorage.setItem('tls-umpire-match',JSON.stringify({token:'token',view}));
  service.liveApi.mockImplementation(async(path:string)=>path==='tablet/state'?view:path==='tablet/command'?{...view,match:{...view.match,status:'IP'}}:{});
- window.history.replaceState(null,'','/umpire/session-test');render(<UmpireApp/>);const start=screen.getByRole('button',{name:'Set up & start match'});
+ window.history.replaceState(null,'','/umpire/session-test');render(<UmpireApp/>);const start=screen.getByRole('button',{name:'Start Warm-up'});
  await waitFor(()=>expect((start as HTMLButtonElement).disabled).toBe(false));
  expect(screen.getByText('Umpire: Jane')).toBeTruthy();expect(screen.queryByText('Challenges left')).toBeNull();expect(screen.getByRole('button',{name:'+ Shuttle'})).toBeTruthy();
- fireEvent.click(start);fireEvent.click(screen.getByRole('button',{name:'Confirm & Start Match'}));
+ fireEvent.click(start);fireEvent.click(screen.getByRole('button',{name:/Start Game ·/}));fireEvent.click(screen.getByRole('button',{name:'Confirm & Start Match'}));
  expect(await screen.findByText(/30 minutes before its scheduled time/)).toBeTruthy();
  expect(service.liveApi.mock.calls.filter(c=>c[0]==='tablet/command')).toHaveLength(0);
  fireEvent.click(screen.getByRole('button',{name:'Go back'}));
@@ -107,19 +107,22 @@ test('released session returns to access-code URL and clears only the expired cr
  window.history.replaceState(null,'','/umpire/public-session-1');render(<UmpireApp/>);
  await screen.findByText('Session released.');expect(window.location.pathname).toBe('/umpire');expect(localStorage.getItem('tls-umpire-match')).toBeNull();
 });
-test('released session retains an unacknowledged score for organiser recovery',async()=>{
+test('released session discards obsolete pending commands and permits a new pairing',async()=>{
  cachedSession(true);service.liveApi.mockRejectedValue(new LiveError('Session released.',401));
  window.history.replaceState(null,'','/umpire/public-session-1');render(<UmpireApp/>);
- await screen.findByText('Session released.');expect(window.location.pathname).toBe('/umpire');expect(JSON.parse(localStorage.getItem('tls-umpire-match')!).pending.operationId).toBe('same-operation');
+ await screen.findByText('Session released.');expect(window.location.pathname).toBe('/umpire');expect(localStorage.getItem('tls-umpire-match')).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'OK',exact:true}));
+ fireEvent.change(screen.getAllByRole('textbox')[1],{target:{value:'ABCD1234'}});fireEvent.click(screen.getByRole('button',{name:'Connect Tablet'}));
+ await waitFor(()=>expect(service.liveApi).toHaveBeenCalledWith('tablet/pair',expect.objectContaining({code:'ABCD1234'})));
 });
 test('pending score on the access page blocks pairing and can resume its own URL',async()=>{
  const view=cachedSession(true);render(<UmpireApp/>);
  fireEvent.change(screen.getAllByRole('textbox')[1],{target:{value:'ABCD1234'}});fireEvent.click(screen.getByRole('button',{name:'Connect Tablet'}));
- await screen.findByText('Retry the pending scoring action before connecting to another match.');expect(service.liveApi).not.toHaveBeenCalled();
- fireEvent.click(screen.getByRole('button',{name:'OK',exact:true}));fireEvent.click(screen.getByRole('button',{name:'Resume pending match'}));
- expect(window.location.pathname).toBe('/umpire/public-session-1');await screen.findByText('Awaiting save');
+ await screen.findByText('Resume the pending match so TLS can finish saving before connecting to another match.');expect(service.liveApi).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole('button',{name:'OK',exact:true}));
  service.liveApi.mockImplementation(async(path:string)=>path==='tablet/command'?{...view,match:{...view.match,version:2,scoreA:1}}:path==='tablet/state'?view:{});
- fireEvent.click(screen.getByRole('button',{name:'Retry pending action'}));
+ fireEvent.click(screen.getByRole('button',{name:'Resume pending match'}));
+ expect(window.location.pathname).toBe('/umpire/public-session-1');
  await waitFor(()=>expect(JSON.parse(localStorage.getItem('tls-umpire-match')!).pending).toBeUndefined());
  expect(service.liveApi).toHaveBeenCalledWith('tablet/command',expect.objectContaining({operationId:'same-operation',action:'POINT'}),'secret-scoring-token',8000);
 });

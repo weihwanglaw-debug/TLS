@@ -7,6 +7,7 @@ using TLS.Data;
 namespace LiveScore.Api;
 public sealed class SetupStore(IDbContextFactory<TLSDbContext> factory)
 {
+    private static object Summary(SetupData data)=>new{data.Revision,events=data.Events.Count,programs=data.Programs.Count,matches=TournamentScheduler.Matches(data).Count()};
     public SetupData Read()
     {
         using var db=factory.CreateDbContext(); using var tx=db.Database.BeginTransaction(System.Data.IsolationLevel.Serializable);
@@ -17,11 +18,11 @@ public sealed class SetupStore(IDbContextFactory<TLSDbContext> factory)
         using var db=factory.CreateDbContext(); using var tx=db.Database.BeginTransaction(System.Data.IsolationLevel.Serializable);
         _=db.SystemSettings.FromSqlRaw("SELECT * FROM SystemSettings WITH (XLOCK,HOLDLOCK) WHERE Id=1").Single();
         var data=SqlStorage.Read(db); CheckRevision(data,revision);
-        var before=JsonSerializer.Serialize(auditView is null?data:auditView(data),JsonDefaults.Options);
-        edit(data); data.Revision++;
+        var before=JsonSerializer.Serialize(auditView is null?Summary(data):auditView(data),JsonDefaults.Options);
+        edit(data); SchedulePlanner.Synchronize(data); data.Revision++;
         SqlStorage.Write(db,data); persist?.Invoke(db);
         db.AuditLogs.Add(new AuditLog { Id=(db.AuditLogs.Max(x=>(long?)x.Id)??0)+1,At=DateTimeOffset.UtcNow.ToString("O"),Action=action,
-            BeforeJson=before,AfterJson=JsonSerializer.Serialize(auditView is null?data:auditView(data),JsonDefaults.Options) });
+            BeforeJson=before,AfterJson=JsonSerializer.Serialize(auditView is null?Summary(data):auditView(data),JsonDefaults.Options) });
         db.SaveChanges(); tx.Commit(); return data;
     }
     // Live score versions are per match. They do not invalidate unrelated fixture previews.

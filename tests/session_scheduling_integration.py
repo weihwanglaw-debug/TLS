@@ -70,7 +70,7 @@ try:
  # A restricted afternoon cannot spill B into the free morning or another day.
  small=copy.deepcopy(body);small['sessions'][1]['end']='14:40:00';p=preview(small)
  check(len(p['matches'])==4 and len(p['unplaced'])==2);check(all(m['programId']==pids[1] for m in p['unplaced']))
- # Shared people in C must rest after their morning A matches, even on another court.
+ # Shared people in C must not overlap their morning A matches, even on another court.
  shared=copy.deepcopy(body);shared['sessions'][1].update(start='12:00:00',end='16:00:00',matchIds=a+b+c);shared['days'][0]['matchIds']=a+b+c
  p=preview(shared);people={e['id']:set(e['participantIds']) for e in s['entries']}
  for match in p['matches']:
@@ -78,7 +78,7 @@ try:
   for other in p['matches']:
    if other['programId']!=pids[0]:continue
    if (people[match['entryA']]|people[match['entryB']])&(people[other['entryA']]|people[other['entryB']]):
-    check(datetime.fromisoformat(match['start'])>=datetime.fromisoformat(other['end'])+timedelta(minutes=120))
+    check(datetime.fromisoformat(match['start'])>=datetime.fromisoformat(other['end']))
  # Closed courts and stale previews fail safely.
  call('dashboard/court',{'revision':revision(),'court':2,'closed':True});preview(body,400);call('dashboard/court',{'revision':revision(),'court':2,'closed':False})
  p=preview(body);plan=view()['eventPlan'];call('tournament/event',{'revision':revision(),'plan':plan},method='PUT');save(p,409)

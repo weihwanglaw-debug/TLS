@@ -24,6 +24,8 @@ globalThis.fetch=(input,init)=>{
 };
 afterEach(cleanup);
 const done=async()=>{};
+async function editEvent(){const button=await screen.findByRole('button',{name:'Edit Event'});await waitFor(()=>expect((button as HTMLButtonElement).disabled).toBe(false));fireEvent.click(button);await screen.findByRole('button',{name:'Save Event'});}
+
 function chooseDate(label:string,value:string){
  fireEvent.click(screen.getByRole('button',{name:label,exact:true}));
  const dialog=screen.getByRole('dialog',{name:label,exact:true});
@@ -42,35 +44,35 @@ globalThis.ResizeObserver=class {observe(){}unobserve(){}disconnect(){}} as unkn
 test('event settings contain officials without court selection',async()=>{
  const {container}=render(<EventSettings eventId={eventId} onChanged={done}/>);
  await screen.findByRole('group',{name:'Event Operating Settings'});
+ await editEvent();
  expect(container.querySelectorAll('input[type=date]')).toHaveLength(0);
  expect(container.querySelectorAll('input[type=time]')).toHaveLength(0);
- expect(screen.queryByText('Playing Sessions')).toBeNull();expect(screen.getByText('Match Timing')).toBeTruthy();fireEvent.change(screen.getByLabelText('Estimated match minutes'),{target:{value:'40'}});fireEvent.change(screen.getByLabelText('Minimum player rest minutes'),{target:{value:'120'}});expect(screen.queryByText('Round Progression')).toBeNull();
+ expect(screen.queryByText('Playing Sessions')).toBeNull();expect(screen.queryByLabelText('Estimated match minutes')).toBeNull();expect(screen.queryByText('Round Progression')).toBeNull();
  expect(screen.queryByText('Courts with line-call review equipment')).toBeNull();
- expect(screen.queryByText('Event Courts')).toBeNull();expect(screen.queryByText('Use All Courts')).toBeNull();expect(screen.queryByRole('switch')).toBeNull();
+ expect(screen.queryByText('Event Courts')).toBeNull();expect(screen.queryByText('Use All Courts')).toBeNull();expect(screen.queryByRole('switch',{name:'Use All Courts'})).toBeNull();
  expect(screen.getAllByLabelText('Official name')).toHaveLength(4);const inputs=screen.getAllByLabelText('Official name') as HTMLInputElement[];const original=inputs[1].value;fireEvent.change(inputs[1],{target:{value:inputs[0].value}});
- fireEvent.click(screen.getByRole('button',{name:'Save Event Settings'}));
+ fireEvent.click(screen.getByRole('button',{name:'Save Event'}));
  await screen.findByRole('dialog',{name:'Unable to complete action'});
  fireEvent.click(screen.getByRole('button',{name:'OK'}));
  fireEvent.change(inputs[1],{target:{value:original}});
- fireEvent.click(screen.getByRole('button',{name:'Save Event Settings'}));
+ fireEvent.click(screen.getByRole('button',{name:'Save Event'}));
  await screen.findByRole('dialog',{name:'Saved successfully'});
  fireEvent.click(screen.getByRole('button',{name:'OK'}));
 });
 
-test('event dates use a separate save panel before fixtures and refresh the displayed dates',async()=>{
+test('event dates use the shared event save and refresh displayed dates',async()=>{
  const initial=await (await fetch('/api/setup/')).json();const original=initial.data.events.find((e:{id:string})=>e.id===eventId);
  let page:ReturnType<typeof render>;
  const refreshed=async()=>{const view=await (await fetch('/api/setup/')).json();page.rerender(<EventDetails view={view} eventId={eventId} onChanged={refreshed}/>);};
  page=render(<EventDetails view={initial} eventId={eventId} onChanged={refreshed}/>);
- const edit=await screen.findByRole('button',{name:'Edit Dates'});fireEvent.click(edit);
- await screen.findByRole('button',{name:'Save Dates'});
+ await editEvent();
  const later=new Date(original.endDate+'T00:00:00Z');later.setUTCDate(later.getUTCDate()+1);
  chooseDate('End Date',later.toISOString().slice(0,10));
- fireEvent.click(screen.getByRole('button',{name:'Save Dates'}));
+ fireEvent.click(screen.getByRole('button',{name:'Save Event'}));
  await screen.findByRole('dialog',{name:'Saved successfully'});fireEvent.click(screen.getByRole('button',{name:'OK',exact:true}));
  const saved=await (await fetch('/api/setup/')).json();expect(saved.data.events.find((e:{id:string})=>e.id===eventId).endDate).toBe(later.toISOString().slice(0,10));
- fireEvent.click(screen.getByRole('button',{name:'Edit Dates'}));await screen.findByRole('button',{name:'Save Dates'});
- chooseDate('End Date',original.endDate);fireEvent.click(screen.getByRole('button',{name:'Save Dates'}));
+ await editEvent();
+ chooseDate('End Date',original.endDate);fireEvent.click(screen.getByRole('button',{name:'Save Event'}));
  await screen.findByRole('dialog',{name:'Saved successfully'});fireEvent.click(screen.getByRole('button',{name:'OK',exact:true}));
  expect((await (await fetch('/api/setup/')).json()).data.events.find((e:{id:string})=>e.id===eventId).endDate).toBe(original.endDate);
 });
@@ -104,8 +106,8 @@ test('guided planning preserves the program between seeding, draw and event sche
  const before=await (await fetch('/api/tournament/'+eventId)).json();render(<FixtureWorkspace eventId={eventId} programId={programId} initialStep="seeding" onBack={()=>{}} onChanged={done} onPresets={()=>{}}/>);
  await screen.findByRole('button',{name:'Continue to Draw'});const steps=screen.getByRole('navigation',{name:'Fixture planning steps'});
  fireEvent.click(screen.getByRole('button',{name:'Continue to Draw'}));await screen.findByText('Game Format');expect((screen.getByLabelText('Planning program') as HTMLSelectElement).value).toBe(programId);expect(within(steps).getByRole('button',{name:/2\. Draw/}).getAttribute('aria-current')).toBe('step');
- fireEvent.click(within(steps).getByRole('button',{name:/3\. Schedule/}));await screen.findByLabelText('Schedule date');expect((screen.getByLabelText('Planning program') as HTMLSelectElement).disabled).toBe(true);expect(screen.getByRole('button',{name:'Program Fixture List'})).toBeTruthy();expect(screen.queryByText('Choose the date to plan its sessions, courts and program rounds.')).toBeNull();
- fireEvent.click(screen.getByRole('button',{name:'Back to Draw'}));await screen.findByText('Game Format');expect((screen.getByLabelText('Planning program') as HTMLSelectElement).value).toBe(programId);expect((await (await fetch('/api/tournament/'+eventId)).json()).revision).toBe(before.revision);
+ fireEvent.click(within(steps).getByRole('button',{name:/3\. Schedule/}));await screen.findByText('Plan tournament schedule');expect((screen.getByLabelText('Planning program') as HTMLSelectElement).disabled).toBe(true);expect(screen.getByRole('button',{name:'Program Fixture List'})).toBeTruthy();expect(screen.queryByText('Choose the date to plan its sessions, courts and program rounds.')).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'Back',exact:true}));await screen.findByText('Game Format');expect((screen.getByLabelText('Planning program') as HTMLSelectElement).value).toBe(programId);expect((await (await fetch('/api/tournament/'+eventId)).json()).revision).toBe(before.revision);
 });
 
 test('TRS sequence: overview, configure, swap preview, Back retains selection, confirm, bracket/table',async()=>{
@@ -161,13 +163,22 @@ test('seeding remains viewable and locked after the draw is saved',async()=>{
  expect((screen.getByRole('switch',{name:'Use Seeding'}) as HTMLButtonElement).disabled||!!screen.getByRole('switch',{name:'Use Seeding'}).closest('fieldset[disabled]')).toBe(true);
 });
 
-test('event schedule carries daily defaults and confirms slots separately from the draw',async()=>{
- const v=await (await fetch('/api/tournament/'+eventId)).json();expect(v.eventPlan.matchMinutes).toBe(40);expect(v.eventPlan.restMinutes).toBe(120);
- await fetch('/api/tournament/event',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision:v.revision,plan:{...v.eventPlan,dailySessions:[{start:'00:00:00',end:'12:00:00'},{start:'12:00:00',end:'23:59:00'}]}})});
- render(<EventSchedule eventId={eventId} onChanged={done} onBack={()=>{}}/>);await screen.findByText('Daily Sessions and Courts');await waitFor(()=>expect(screen.queryAllByText('Calculating capacity…')).toHaveLength(0),{timeout:10000});expect(screen.queryByLabelText('Estimated match minutes')).toBeNull();expect(screen.queryByLabelText('Minimum player rest minutes')).toBeNull();expect(screen.getAllByRole('button',{name:/Session [12] (start|end) time/})).toHaveLength(4);
- for(const round of screen.getAllByRole('switch',{name:/Test Singles/})){if(!(round as HTMLButtonElement).disabled){fireEvent.click(round);await waitFor(()=>expect(screen.queryAllByText('Calculating capacity…')).toHaveLength(0),{timeout:10000});}}for(const button of screen.getAllByRole('button',{name:'Save Session'})){if(!(button as HTMLButtonElement).disabled){fireEvent.click(button);await waitFor(()=>expect((button as HTMLButtonElement).disabled).toBe(true));await waitFor(()=>expect(screen.queryAllByText('Calculating capacity…')).toHaveLength(0),{timeout:10000});}}await waitFor(()=>expect((screen.getByRole('button',{name:'Preview Schedule'}) as HTMLButtonElement).disabled).toBe(false),{timeout:10000});fireEvent.click(screen.getByRole('button',{name:'Preview Schedule'}));await screen.findByText('Review Schedule').catch(e=>{throw new Error(screen.queryAllByRole('dialog').map(d=>d.textContent).join(' | ')||e.message);});
+test('whole tournament planning saves sessions separately and confirms a full preview',async()=>{
+ const v=await (await fetch('/api/tournament/'+eventId)).json();await fetch('/api/tournament/event',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision:v.revision,plan:{...v.eventPlan,dailySessions:[{start:'00:00:00',end:'12:00:00'},{start:'12:00:00',end:'23:59:00'}]}})});
+ render(<EventSchedule eventId={eventId} onChanged={done} onBack={()=>{}}/>);
+ await screen.findByText('Set match durations');
+ fireEvent.change(screen.getByLabelText('Rest warning minutes'),{target:{value:'0'}});
+ fireEvent.click(screen.getByRole('button',{name:'Continue to sessions'}));
+ await screen.findByText('Set available sessions');
+ fireEvent.click(screen.getByRole('button',{name:'Continue to assignment'}));
+ await screen.findByRole('heading',{name:'Assign matches',exact:true});
+ const auto=screen.getByRole('button',{name:'Auto Assign remaining'});await waitFor(()=>expect((auto as HTMLButtonElement).disabled).toBe(false));fireEvent.click(auto);
+ await screen.findByText('All remaining matches allocated. Review the timetable before confirming.');
  const before=await (await fetch('/api/tournament/'+eventId)).json();expect(before.plans[0].matches.every((m:{start:string|null})=>!m.start)).toBe(true);
- fireEvent.click(screen.getByRole('button',{name:'Confirm Schedule'}));await screen.findByRole('dialog',{name:'Saved successfully'});fireEvent.click(screen.getByRole('button',{name:'OK'}));
+ fireEvent.click(screen.getByRole('button',{name:'Review timetable'}));
+ await screen.findByText('No court/player clashes or rest warnings found.');
+ fireEvent.click(screen.getByRole('button',{name:'Confirm schedule'}));
+ await screen.findByText('Schedule confirmed. Round durations are locked.');
  const saved=await (await fetch('/api/tournament/'+eventId)).json();expect(saved.plans[0].matches.every((m:{start:string|null;court:number|null})=>m.start&&m.court)).toBe(true);expect(saved.eventPlan.dailySessions).toHaveLength(0);expect(saved.eventPlan.sessions).toHaveLength(2);
 });
 
@@ -178,9 +189,9 @@ test('saved schedule appears in bracket and table, with print grouped under Opti
  fireEvent.click(screen.getByRole('button',{name:'Options'}));expect(screen.getByRole('menuitem',{name:'Print / Save PDF'})).toBeTruthy();expect(screen.queryByRole('button',{name:'Print / Save PDF'})).toBeNull();expect(screen.getByRole('menuitem',{name:'Export Match Results (Selected Round)'})).toBeTruthy();expect(screen.queryByRole('button',{name:'Export CSV'})).toBeNull();
 });
 
-test('Edit Dates stays visible but alerts when a fixture exists in any program',async()=>{
+test('Edit Event retains locked dates when a fixture exists in any program',async()=>{
  const saved=await (await fetch('/api/setup/')).json();render(<EventDetails view={saved} eventId={eventId} onChanged={done}/>);
- fireEvent.click(await screen.findByRole('button',{name:'Edit Dates'}));await screen.findByRole('dialog',{name:'Unable to complete action'});expect(screen.getByText('Reset Schedule before changing event dates. Started matches and results keep event dates locked.')).toBeTruthy();expect(screen.queryByRole('button',{name:'Save Dates'})).toBeNull();expect(screen.queryByText('Event Courts')).toBeNull();
+ await editEvent();expect(screen.getByText('Reset Schedule before changing event dates. Started matches and results keep event dates locked.')).toBeTruthy();expect(screen.queryByRole('button',{name:'Start Date',exact:true})).toBeNull();expect(screen.queryByText('Event Courts')).toBeNull();
 });
 
 test('scheduled fixtures open the fourth step with Table View and keep the shared program header',async()=>{
@@ -231,7 +242,8 @@ test('umpire uses saved service setup, point acknowledgements, scoresheet and pa
  localStorage.setItem('tls-umpire-match',JSON.stringify({token:result.token,view:result.match}));
  cleanup();window.history.replaceState(null,'','/umpire/'+result.match.sessionId);render(<UmpireApp/>);
  await screen.findByText('Saved to venue');
- fireEvent.click(screen.getByRole('button',{name:'Set up & start match'}));
+ fireEvent.click(screen.getByRole('button',{name:'Start Warm-up'}));
+ fireEvent.click(screen.getByRole('button',{name:/Start Game ·/}));
  expect(document.querySelector('.umpire-dialog select')).toBeNull();
  expect(screen.getAllByText('Automatically selected')).toHaveLength(2);
  const servingGroup=screen.getByRole('group',{name:'Serving side'});
@@ -241,7 +253,7 @@ test('umpire uses saved service setup, point acknowledgements, scoresheet and pa
  expect(screen.queryByRole('dialog')).toBeNull();
  const beforeStart=await (await fetch('/api/dashboard/')).json();
  expect(beforeStart.courts.find((c:any)=>c.match?.id===result.match.match.id).match.status).toBe('SC');
- fireEvent.click(screen.getByRole('button',{name:'Set up & start match'}));
+ fireEvent.click(screen.getByRole('button',{name:/Start Game ·/}));
  fireEvent.click(screen.getByRole('button',{name:'Confirm & Start Match'}));
  await waitFor(()=>expect(screen.queryByRole('button',{name:'Start match',exact:true})||!screen.queryByRole('dialog')).toBeTruthy());
  const early=screen.queryByRole('button',{name:'Start match',exact:true});if(early)fireEvent.click(early);

@@ -2,6 +2,7 @@ namespace LiveScore.Api;
 
 public sealed class EventPlan
 {
+    public SchedulePlannerState? SchedulePlanner { get; set; }
     public TrsPublicationSettings Publication { get; set; } = new();
     public PlanningDraft? PlanningDraft { get; set; }
     public string EventId { get; set; } = "";
@@ -15,7 +16,7 @@ public sealed class EventPlan
     // Retained solely to read review availability from older saved match assignments.
     public int[] ReviewCourts { get; set; } = [];
     public int MatchMinutes { get; set; } = 40;
-    public int RestMinutes { get; set; } = 120;
+    public int RestMinutes { get; set; } = 0;
 }
 public sealed record PlayingSession(DateOnly Date,TimeOnly Start,TimeOnly End,int[]? Courts=null,string[]? MatchIds=null,[property:System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] Dictionary<string,int>? ProgramLimits=null);
 public sealed record ScheduleDay(DateOnly Date,int[] Courts,string[] MatchIds);
@@ -27,6 +28,7 @@ public sealed class BadmintonRules
     public int PointsToWin { get; set; } = 21;
     public int WinBy { get; set; } = 2;
     public int PointCap { get; set; } = 30;
+    public int WarmupSeconds { get; set; } = 120;
     public int IntervalAt { get; set; } = 11;
     public int IntervalSeconds { get; set; } = 60;
     public int BetweenGamesSeconds { get; set; } = 120;

@@ -10,7 +10,7 @@ public static class ScheduleSlotSwaps
         foreach(var m in new[]{a,b})
         {
             TournamentRules.Need(s.Programs.Any(p=>p.Id==m.ProgramId&&p.EventId==plan.EventId&&p.Status=="A"),"Choose matches from this event.");
-            TournamentRules.Need(m.Status==MatchStatus.Scheduled&&m.ActualStartedAt is null&&m.Games.Count==0&&(m.Live?.Corrections.Count??0)==0&&!s.Venue.Bindings.Any(x=>x.MatchId==m.Id),"Only unstarted, uncalled matches without recorded results can swap slots.");
+            TournamentRules.Need(m.Status==MatchStatus.Scheduled&&!FixtureResets.StartedOrScored(m)&&!s.Venue.Bindings.Any(x=>x.MatchId==m.Id),"Only unstarted, uncalled matches without recorded results can swap slots.");
             TournamentRules.Need(m.Start.HasValue&&m.End.HasValue&&m.Court.HasValue&&m.DurationMinutes>0,"Both matches need saved or previewed slots.");
         }
         var courtA=a.Court;var courtB=b.Court;

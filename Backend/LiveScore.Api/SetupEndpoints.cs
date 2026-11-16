@@ -72,10 +72,9 @@ public static class SetupEndpoints
             if(request.LiveDisplay is not null)
             {
                 var d=request.LiveDisplay;
-                TournamentRules.Need(d.Columns is >=1 and <=6&&d.Rows is >=1 and <=6,"Display rows and columns must be 1–6.");
+                TournamentRules.Need(d.SupportsLayout(),"Choose a supported display layout (rows by columns).");
                 TournamentRules.Need(d.PageSeconds is >=3 and <=120,"Display page duration must be 3–120 seconds.");
-                TournamentRules.Need(d.EventId is not null&&(d.EventId==""||s.Events.Any(e=>e.Id==d.EventId)),"Choose an imported display event.");
-                TournamentRules.Need(d.Courts is not null&&d.Courts.Distinct().Count()==d.Courts.Length&&d.Courts.All(c=>c>=1&&c<=s.CourtCount),"Choose valid, distinct display courts.");
+                d.EventId="";d.Courts=[];d.AutoRotate=true;
                 s.Venue.Display=d;
             }
 

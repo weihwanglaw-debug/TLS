@@ -24,8 +24,8 @@ def request(windows,rest=120):return {'revision':rev(),'eventId':eid,'matchMinut
 def window(day,start,end,ids,limits,courts=None):return {'date':day,'start':start,'end':end,'courts':courts or [1,2,3,4],'matchIds':ids,'programLimits':limits}
 def parity(body):
  before=state();audit=int(db._sql('audit').strip());capacity=call('scheduling/capacity',body);preview=call('scheduling/preview',body)
- check(capacity['matches']==preview['matches']);check(capacity['unplaced']==preview['unplaced']);check(state()==before);check(int(db._sql('audit').strip())==audit)
- for c,p in zip(capacity['sessions'],preview['sessions']):check(c['capacity']>=p['capacity'])
+ check(not capacity['matches'] and not capacity['unplaced']);check(state()==before);check(int(db._sql('audit').strip())==audit)
+ for c,p in zip(capacity['sessions'],preview['sessions']):check(c['capacity']==p['capacity'])
  return capacity,preview
 with socket.socket() as probe:assert probe.connect_ex(('127.0.0.1',5215))!=0
 db=TestDatabase()
@@ -53,28 +53,59 @@ try:
  before=state();windows=[window(first,'15:00:00','18:00:00',[],{}),window(first,'19:00:00','22:00:00',[],{})]
  cap,_=parity(request(windows));check(cap['sessions'][0]['capacity']>0)
  windows[0].update(matchIds=singles,programLimits={a:16});windows[1].update(matchIds=singles+doubles,programLimits={a:8,b:4})
- body=request(windows);cap,preview=parity(body);check(cap['sessions'][0]['capacity']==8);check(sum(m['programId']==a and m['start']<first+'T18:00:00' for m in preview['matches'])==8)
- error=call('scheduling/validate-session',{'revision':rev(),'eventId':eid,'sessions':windows,'sessionIndex':0},400);check('Only 8 of 16' in error['message']);check(state()==before)
- # Applying the returned placed counts produces exactly the same proposed slots, with no quota shortfalls.
+ body=request(windows);cap,preview=parity(body)
+ check([w['capacity'] for w in cap['sessions']]==[16,16])
+ # Quantities in one session cannot shrink another session's capacity.
+ for count in [0,8,15,16]:
+  changed=copy.deepcopy(body);changed['sessions'][0]['programLimits'][a]=count
+  result,_=parity(changed);check([w['capacity'] for w in result['sessions']]==[16,16])
+ check(call('scheduling/validate-session',{'revision':rev(),'eventId':eid,'sessions':windows,'sessionIndex':0})['valid']);check(state()==before)
+ # A legacy rest value is accepted but has no effect on the proposed slots.
+ noRest=copy.deepcopy(body);noRest['restMinutes']=0
+ _,withoutRest=parity(noRest);check(withoutRest['matches']==preview['matches'])
+ # Real player and court overlaps remain impossible; back-to-back matches are allowed.
+ people={e['id']:set(e['participantIds']) for e in state()['entries']}
+ backToBack=False
+ for x in preview['matches']:
+  for y in preview['matches']:
+   if x['id']==y['id']:continue
+   shared=(people[x['entryA']]|people[x['entryB']])&(people[y['entryA']]|people[y['entryB']])
+   if shared or x['court']==y['court']:check(x['end']<=y['start'] or y['end']<=x['start'])
+   if shared and x['end']==y['start']:backToBack=True
+ check(backToBack)
  normalized=copy.deepcopy(body)
- for w,c in zip(normalized['sessions'],cap['sessions']):w['programLimits']={x['programId']:x['scheduled'] for x in c['programs'] if x['requested']}
- ncap,npreview=parity(normalized);check(npreview['matches']==preview['matches'])
- check(all(p['requested']==p['scheduled'] for w in npreview['sessions'] for p in w['programs']))
- check(call('scheduling/validate-session',{'revision':rev(),'eventId':eid,'sessions':normalized['sessions'],'sessionIndex':0})['valid']);check(state()==before)
- # Each program's maximum is demonstrably placeable alongside the other requested quantities.
- for index,c in enumerate(ncap['sessions']):
-  for program in c['programs']:
-   trial=copy.deepcopy(normalized);w=trial['sessions'][index];w['programLimits'][program['programId']]=program['maximum'];w['programLimits'].setdefault(a,0);w['programLimits'].setdefault(b,0);w['matchIds']=singles+doubles;trial['days'][0]['matchIds']=singles+doubles
-   trialCap,trialPreview=parity(trial)
-   got=sum(m['programId']==program['programId'] and m['start']>=w['date']+'T'+w['start'] and m['end']<=w['date']+'T'+w['end'] for m in trialPreview['matches'])
-   check(got>=program['maximum'])
- shorter=copy.deepcopy(normalized);shorter['restMinutes']=20;parity(shorter)
- fewer=copy.deepcopy(normalized)
+ fewer=copy.deepcopy(body)
  for w in fewer['sessions']:w['courts']=[1,2]
- fewer['days'][0]['courts']=[1,2];parity(fewer)
+ fewer['days'][0]['courts']=[1,2]
+ smaller,_=parity(fewer);check([w['capacity'] for w in smaller['sessions']]==[8,8])
+ shorter=copy.deepcopy(body);shorter['sessions'][1]['end']='21:00:00'
+ smaller,_=parity(shorter);check([w['capacity'] for w in smaller['sessions']]==[16,12])
+ # Capacity ignores save/placement rules, and incomplete cards do not affect siblings.
+ overlap=copy.deepcopy(body);overlap['sessions'][1].update(start='17:00:00',end='19:00:00')
+ result=call('scheduling/capacity',overlap);check([w['capacity'] for w in result['sessions']]==[16,12])
+ call('scheduling/preview',overlap,400)
+ past=copy.deepcopy(body);past['sessions'][0]['date']=(date.today()-timedelta(days=1)).isoformat()
+ result=call('scheduling/capacity',past);check(result['sessions'][0]['capacity']==16)
+ incomplete=copy.deepcopy(body);incomplete['sessions'][0].update(start='19:00:00',end='18:00:00')
+ result=call('scheduling/capacity',incomplete);check(result['sessions'][0]['capacity'] is None and result['sessions'][0]['issue']);check(result['sessions'][1]['capacity']==16)
+ incomplete['sessions'][0].update(start='15:00:00',courts=[])
+ result=call('scheduling/capacity',incomplete);check(result['sessions'][0]['capacity']==0);check(result['sessions'][1]['capacity']==16)
+ malformedSelection=copy.deepcopy(body);malformedSelection['sessions'][0].update(matchIds=['not-a-match'],programLimits={'unknown':999})
+ check(call('scheduling/capacity',malformedSelection)['sessions'][0]['capacity']==16);check(state()==before)
+ # Legacy date-level court selections use the same formula in capacity and Preview.
+ legacy={'revision':rev(),'eventId':eid,'matchMinutes':40,'restMinutes':0,'sessions':[{'date':second,'start':'10:00:00','end':'13:00:00'}],'days':[{'date':second,'courts':[1,2],'matchIds':[]}]}
+ legacyCap,legacyPreview=parity(legacy);check(legacyCap['sessions'][0]['capacity']==8)
  stale=copy.deepcopy(normalized);stale['revision']=0;call('scheduling/capacity',stale,409);check(state()==before)
  check(call('scheduling/capacity',request([window(second,'10:00:00','22:00:00',singles,{a:24})]))['sessions'][0]['capacity']>8)
- print(f'PASS: {checks} capacity checks: reported group setup, empty selection, shared players/rest, quota reconciliation, per-program maxima, exact preview placement parity, changed courts/rest/date, stale revision and no writes.')
+ # Confirmed slots reduce only the allowance for new matches; total capacity stays fixed.
+ confirmed=call('scheduling/preview',body);call('scheduling/confirm',{'revision':confirmed['revision'],'token':confirmed['token']})
+ fresh=copy.deepcopy(body);fresh['revision']=rev()
+ after=state();result=call('scheduling/capacity',fresh)
+ check([w['capacity'] for w in result['sessions']]==[16,16]);check(result['sessions'][0]['available']==0);check(state()==after)
+ # Excess new requests are rejected at Save Session, without rescheduling existing matches.
+ full=copy.deepcopy(fresh['sessions']);full[0]['programLimits']={a:16}
+ call('scheduling/validate-session',{'revision':rev(),'eventId':eid,'sessions':full,'sessionIndex':0},400);check(state()==after)
+ print(f'PASS: {checks} capacity checks: fixed court-time capacity, independent session quantities, legacy rest ignored, player/court overlap prevention, back-to-back play, preview parity, changed courts/duration/date, stale revision and no writes.')
 finally:
  if process:process.terminate();process.wait(timeout=10)
  db.close()

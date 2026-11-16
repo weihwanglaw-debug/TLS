@@ -8,22 +8,22 @@ public sealed record SbaPlayer(string SbaId,string Name,string Club,string Dob);
 public sealed record SbaRankingRow(int Id,string RankingType,SbaPlayer Player1,SbaPlayer? Player2,int AccumulatedScore,int Ranking,int Tournaments,int? YearOfBirth=null,DateTimeOffset? UpdatedAt=null);
 public sealed record RankingRequest(long Revision,string ProgramId,string RankingType);
 
-public sealed class TrsIntegration(IConfiguration configuration,IWebHostEnvironment environment,IHttpClientFactory clients)
+public sealed class TrsIntegration(IConfiguration configuration,IWebHostEnvironment environment,IHttpClientFactory clients, TrsConnection connection)
 {
     public async Task<SetupPackage[]> Events(CancellationToken cancellation)
     {
-        var api = configuration["Trs:ApiBaseUrl"];
+        var (api, token) = connection.Read();
         if (string.IsNullOrWhiteSpace(api)) return await Read<SetupPackage>("EventFile", cancellation);
         TournamentRules.Need(Uri.TryCreate(api, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https", "Configure a valid TRS API base URL.");
-        var token = configuration["Trs:AccessToken"];
-        TournamentRules.Need(!string.IsNullOrWhiteSpace(token), "Configure the TRS access token before loading events.");
+        TournamentRules.Need(!string.IsNullOrWhiteSpace(token), "Configure the shared TRS integration key before loading events.");
         using var client = clients.CreateClient("trs-publication");
         async Task<T> Get<T>(string path)
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, api.TrimEnd('/') + "/api/tls-export/" + path);
-            request.Headers.Authorization = new("Bearer", token);
+            request.Headers.Add("X-TLS-Key", token);
             using var response = await client.SendAsync(request, cancellation);
-            TournamentRules.Need(response.IsSuccessStatusCode, $"TRS event transfer returned HTTP {(int)response.StatusCode}. Check the connection and access token.");
+            if (!response.IsSuccessStatusCode)
+                throw new RuleException(TransferError((int)response.StatusCode, await response.Content.ReadAsStringAsync(cancellation)));
             var data = await response.Content.ReadFromJsonAsync<T>(JsonDefaults.Options, cancellation);
             TournamentRules.Need(data is not null, "TRS returned an empty event transfer.");
             return data!;
@@ -33,6 +33,20 @@ public sealed class TrsIntegration(IConfiguration configuration,IWebHostEnvironm
         foreach (var ev in events) packages.Add(await Get<SetupPackage>("events/" + ev.Id));
         return packages.ToArray();
     }
+    public static string TransferError(int status, string body)
+    {
+        try
+        {
+            using var error = JsonDocument.Parse(body);
+            foreach (var field in new[] { "message", "detail", "title" })
+                if (error.RootElement.ValueKind == JsonValueKind.Object && error.RootElement.TryGetProperty(field, out var value)
+                    && value.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(value.GetString()))
+                    return value.GetString()!;
+        }
+        catch (JsonException) { }
+        return $"TRS returned HTTP {status}.";
+    }
+
     public async Task<T[]> Read<T>(string setting,CancellationToken cancellation)
     {
         var file=configuration["Trs:"+setting];
@@ -51,8 +65,10 @@ public sealed class TrsIntegration(IConfiguration configuration,IWebHostEnvironm
         {
             try{return await next(c);}
             catch(Exception ex)when(ex is JsonException or HttpRequestException or TaskCanceledException or IOException)
-            {return Results.BadRequest(new{message="TRS data is unavailable or invalid. Check the configured connection or transfer file. Existing TLS records remain available."});}
+            {return Results.BadRequest(new{message=ex is TaskCanceledException ? "The TRS request timed out." : ex.Message});}
         });
+        group.MapGet("/connection", (TrsConnection connection, HttpContext context) => { context.Response.Headers.CacheControl = "no-store"; return connection.View(); });
+        group.MapPut("/connection", (TrsConnectionRequest request, TrsConnection connection) => connection.Save(request));
         group.MapGet("/events",async(TrsIntegration integration,CancellationToken cancellation)=>
         {
             var packages=await integration.Events(cancellation);
