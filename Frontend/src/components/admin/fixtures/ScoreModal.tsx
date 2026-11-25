@@ -18,6 +18,7 @@ import { getEntryDisplay } from "@/lib/entryDisplay";
 
 
 interface Props {
+  walkoverOnly?: boolean;
   children?: React.ReactNode;
   busy?: boolean;
   error?: string;
@@ -95,7 +96,7 @@ function TeamPanel({
 
 //  Main modal
 
-export function ScoreModal({ open, draft, isLocked, onClose, onSave, onClear, onChangeDraft, children, busy=false, error }: Props) {
+export function ScoreModal({ open, draft, isLocked, onClose, onSave, onClear, onChangeDraft, children, busy=false, error, walkoverOnly=false }: Props) {
 
   if (!draft) return null;
 
@@ -164,11 +165,11 @@ export function ScoreModal({ open, draft, isLocked, onClose, onSave, onClear, on
 
         <DialogHeader className="px-7 pt-7 pb-0">
           <DialogTitle className="font-bold text-lg">
-            {isLocked ? "Edit Score" : "Enter Score"}
+            {walkoverOnly ? "Record walkover" : isLocked ? "Edit Score" : "Enter Score"}
           </DialogTitle>
           {(draft.courtNo || draft.matchDate) && (
             <p className="text-xs opacity-50 mt-1">
-              {draft.courtNo && `${draft.courtNo}  `}
+              {draft.courtNo && `Court ${draft.courtNo} · `}
               {draft.matchDate && `${new Date(draft.matchDate).toLocaleDateString("en-SG", { weekday:"short", day:"2-digit", month:"short" })}  `}
               {draft.startTime && `${draft.startTime}${draft.endTime ? `-${draft.endTime}` : ""}`}
             </p>
@@ -201,7 +202,7 @@ export function ScoreModal({ open, draft, isLocked, onClose, onSave, onClear, on
           </div>
 
   {/*  Walkover toggle  */}
-          <div className="flex items-center justify-between gap-3 px-4 py-3"
+          {!walkoverOnly&&<div className="flex items-center justify-between gap-3 px-4 py-3"
             style={{ border: "1px solid var(--color-table-border)" }}>
             <label className="flex items-center gap-2 text-sm cursor-pointer">
               <AlertTriangle className="h-4 w-4 opacity-50 flex-shrink-0" />
@@ -211,7 +212,7 @@ export function ScoreModal({ open, draft, isLocked, onClose, onSave, onClear, on
               aria-label="Walkover - one side did not show"
               checked={draft.walkover}
               onCheckedChange={v => set({ walkover: v, walkoverWinner: "", winner: null })} />
-          </div>
+          </div>}
 
   {/*  Game scores  */}
           {!draft.walkover && (
@@ -262,8 +263,8 @@ export function ScoreModal({ open, draft, isLocked, onClose, onSave, onClear, on
             </div>
           )}
 
-          {children}
-          <div><p className={sectionLabelClass}>Assigned officials</p>{draft.officials.map(o=><p className="text-sm mt-2" key={o.id}>{o.role}: {o.name}</p>)}</div>
+          {!walkoverOnly&&children}
+          {!walkoverOnly&&<div><p className={sectionLabelClass}>Assigned officials</p>{draft.officials.map(o=><p className="text-sm mt-2" key={o.id}>{o.role}: {o.name}</p>)}</div>}
         </fieldset></div>
 
         <DialogFooter className="px-7 pb-7 pt-0 flex items-center justify-between">
@@ -279,7 +280,7 @@ export function ScoreModal({ open, draft, isLocked, onClose, onSave, onClear, on
             <button disabled={busy} onClick={onClose} className="btn-outline px-5 py-2.5 text-sm">Cancel</button>
             <button onClick={saveWithCurrentTime} disabled={busy||!canSave}
               className="btn-primary px-6 py-2.5 text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
-              Save Result
+              {walkoverOnly?'Confirm walkover':'Save Result'}
             </button>
           </div>
         </DialogFooter>

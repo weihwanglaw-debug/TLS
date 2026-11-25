@@ -8,16 +8,19 @@ let data:DashboardData;
 globalThis.ResizeObserver=class {observe(){}unobserve(){}disconnect(){}} as unknown as typeof ResizeObserver;
 const match=(id:string,court:number)=>({id,number:Number(id.slice(1)),eventId:'e',programId:'p',programName:"Men's Singles",roundLabel:'Quarterfinals',status:'SC',nameA:'Player A '+id,nameB:'Player B '+id,court,plannedStart:'2026-10-26T15:00:00',games:[],rules:{gamesToWin:2,pointsToWin:21},rulesAssigned:true,presetId:'preset',umpireId:'official',reviewAvailable:false} as LiveMatch);
 beforeEach(()=>{
- localStorage.clear();localStorage.setItem('tls-dashboard-event','e');
+ localStorage.clear();
  const a=match('m1',1),b=match('m2',2),c=match('m3',3);
  const queue=[a,b,c].map(m=>({match:m,estimatedStart:'2026-10-26T07:00:00Z',delayed:false,delayMinutes:0,waitingFor:'Ready to call',eligibleCourts:[1,2,3,4]}));
  data={revision:4,selectedEventId:'e',serverTime:'2026-10-26T06:00:00Z',serverLocalTime:'2026-10-26T14:00:00',timeZone:'Asia/Singapore',events:[{id:'e',name:'Test Event',startDate:'2026-10-26',endDate:'2026-10-28',courts:[1,2,3,4]}],eventContext:{calendar:'O',sessionState:'B',day:1,nextSession:'2026-10-26T15:00:00'},queue,courts:[1,2,3,4].map(number=>({number,status:number===3?'W':number===4?'X':'A',outsideEvent:false,match:number===3?c:null,lastMatch:null,next:queue.find(q=>q.match.court===number)||null,device:{state:'N',name:'',ipAddress:'',lastSeen:null,codeExpired:false}})),programs:[],presets:[],officials:[{eventId:'e',id:'official',name:'Umpire One'}],tabletUrls:['http://localhost/umpire']} as DashboardData;
  service.liveApi.mockReset();service.liveApi.mockImplementation(async(path:string,body?:{matchId:string;court:number})=>body?{code:'TESTCODE',expiresAt:'2026-10-26T07:10:00Z',match:{...data.queue.find(q=>q.match.id===body.matchId)!.match,court:body.court}}:structuredClone(data));
 });
 afterEach(cleanup);
-const show=()=>render(<LiveDashboard onFixtures={()=>{}} onChanged={async()=>{}}/>);
+const show=async()=>{
+ render(<LiveDashboard onFixtures={()=>{}} onChanged={async()=>{}}/>);
+ fireEvent.change(await screen.findByLabelText('Dashboard event'),{target:{value:'e'}});
+};
 test('court card calls its next match with the court preselected and no override controls',async()=>{
- show();fireEvent.click(await screen.findByRole('button',{name:'Call Next Match on Court 2'}));
+ await show();fireEvent.click(await screen.findByRole('button',{name:'Call Next Match on Court 2'}));
  const dialog=screen.getByRole('dialog',{name:'Assign Court / Tablet'});
  expect(within(dialog).getByLabelText('Assigned court').textContent).toBe('Court 2');
  expect(within(dialog).queryByLabelText('Assign court')).toBeNull();
@@ -30,7 +33,7 @@ test('court card calls its next match with the court preselected and no override
 });
 test('queue assignment offers only available courts and moves only the chosen match',async()=>{
  data.queue[0].match.court=3;
- show();const buttons=await screen.findAllByRole('button',{name:'Assign to Court'});fireEvent.click(buttons[0]);
+ await show();const buttons=await screen.findAllByRole('button',{name:'Assign to Court'});fireEvent.click(buttons[0]);
  const dialog=screen.getByRole('dialog',{name:'Assign Court / Tablet'}),select=within(dialog).getByLabelText('Assign court');
  expect(within(select).getAllByRole('option').map(o=>(o as HTMLOptionElement).value)).toEqual(['0','1','2']);
  fireEvent.change(select,{target:{value:'2'}});fireEvent.click(within(dialog).getByRole('button',{name:'Assign & Generate Code'}));
@@ -39,12 +42,12 @@ test('queue assignment offers only available courts and moves only the chosen ma
 });
 test('no available court disables queue assignment and hides calling actions',async()=>{
  data.courts.forEach(c=>{c.status='W';c.match=match('m'+c.number,c.number);});
- show();const buttons=await screen.findAllByRole('button',{name:'Assign to Court'});
+ await show();const buttons=await screen.findAllByRole('button',{name:'Assign to Court'});
  expect(buttons.every(b=>(b as HTMLButtonElement).disabled)).toBe(true);
  expect(screen.queryByRole('button',{name:/Call Next Match/})).toBeNull();
 });
 test('table view offers the same calling action',async()=>{
- localStorage.setItem('tls-court-view','table');show();
+ localStorage.setItem('tls-court-view','table');await show();
  expect(await screen.findByRole('button',{name:'Call Next Match on Court 1'})).toBeTruthy();
  expect(screen.queryByRole('button',{name:'Call Next Match on Court 3'})).toBeNull();
 });
@@ -52,7 +55,7 @@ test.each(['SC','IP','RC'])('umpires reserved for another %s match are disabled 
  data.courts[2].match!.status=status;
  data.officials.push({eventId:'e',id:'busy',name:'Busy Umpire',reservations:[{matchId:'m3',court:3}]});
  data.queue[0].match.umpireId='busy';
- show();fireEvent.click(await screen.findByRole('button',{name:'Call Next Match on Court 1'}));
+ await show();fireEvent.click(await screen.findByRole('button',{name:'Call Next Match on Court 1'}));
  const dialog=screen.getByRole('dialog',{name:'Assign Court / Tablet'}),select=within(dialog).getByLabelText('Official 1');
  expect((within(select).getByRole('option',{name:'Busy Umpire · Busy · Court 3'}) as HTMLOptionElement).disabled).toBe(true);
  expect((select as HTMLSelectElement).value).toBe('');
@@ -63,7 +66,7 @@ test.each(['SC','IP','RC'])('umpires reserved for another %s match are disabled 
 test('renewing the same match keeps its own reserved umpire selectable',async()=>{
  data.officials[0].reservations=[{matchId:'m1',court:1}];
  data.courts[0].status='W';data.courts[0].match=data.queue[0].match;
- show();await screen.findAllByRole('button',{name:'Assign to Court'});
+ await show();await screen.findAllByRole('button',{name:'Assign to Court'});
  fireEvent.click(screen.getByRole('button',{name:'Open actions for Court 1'}));
  fireEvent.click(screen.getByRole('menuitem',{name:'Issue / Renew Access Code'}));
  const dialog=screen.getByRole('dialog',{name:'Assign Court / Tablet'});
@@ -72,7 +75,7 @@ test('renewing the same match keeps its own reserved umpire selectable',async()=
 });
 
 test('cancel wrong call is visible and releases the waiting assignment without rescheduling',async()=>{
- show();fireEvent.click(await screen.findByRole('button',{name:'Cancel Call / Return to Queue'}));
+ await show();fireEvent.click(await screen.findByRole('button',{name:'Cancel Call / Return to Queue'}));
  const dialog=screen.getByRole('dialog',{name:'Cancel Call / Return to Queue'});
  expect(within(dialog).getByText(/saved schedule unchanged/)).toBeTruthy();
  fireEvent.click(within(dialog).getByRole('button',{name:'Confirm'}));
@@ -81,12 +84,12 @@ test('cancel wrong call is visible and releases the waiting assignment without r
 });
 test('disconnected tablet can get a fresh invitation while keeping its match and umpire',async()=>{
  data.courts[2].device.state='D';data.courts[2].match!.version=9;
- show();fireEvent.click(await screen.findByRole('button',{name:'Generate New Code'}));
+ await show();fireEvent.click(await screen.findByRole('button',{name:'Generate New Code'}));
  await waitFor(()=>expect(service.liveApi).toHaveBeenCalledWith('dashboard/pairing',{revision:4,matchId:'m3',version:9}));
  expect(await screen.findByRole('dialog',{name:'Connect Tablet · Match #3'})).toBeTruthy();
 });
 test('pairing panel closes when the invitation has been consumed',async()=>{
- data.tabletUrls=['http://192.168.1.10:5180/umpire'];show();
+ data.tabletUrls=['http://192.168.1.10:5180/umpire'];await show();
  fireEvent.click(await screen.findByRole('button',{name:'Call Next Match on Court 1'}));
  fireEvent.click(within(screen.getByRole('dialog',{name:'Assign Court / Tablet'})).getByRole('button',{name:'Assign & Generate Code'}));
  await screen.findByRole('dialog',{name:'Connect Tablet · Match #1'});
@@ -97,7 +100,7 @@ test('pairing panel closes when the invitation has been consumed',async()=>{
 
 test('assignment adds service and line judges without the exception or reservation text',async()=>{
  data.officials.push({eventId:'e',id:'service',name:'Service Official'},{eventId:'e',id:'line',name:'Line Official'});
- show();fireEvent.click(await screen.findByRole('button',{name:'Call Next Match on Court 1'}));
+ await show();fireEvent.click(await screen.findByRole('button',{name:'Call Next Match on Court 1'}));
  const dialog=screen.getByRole('dialog',{name:'Assign Court / Tablet'});
  expect(within(dialog).queryByText('Court exception')).toBeNull();expect(within(dialog).queryByText(/reserves the selected court/)).toBeNull();expect(within(dialog).queryByRole('switch',{name:'Challenge review available on this court'})).toBeNull();
  fireEvent.click(within(dialog).getByRole('button',{name:'+ Add official'}));fireEvent.change(within(dialog).getByLabelText('Official 2'),{target:{value:'service'}});
@@ -109,13 +112,13 @@ test('assignment adds service and line judges without the exception or reservati
 test('saved optional officials load into assignment and challenge switch is relevant to the preset',async()=>{
  data.queue[0].match.serviceJudgeId='service';data.queue[0].match.lineJudgeIds=['line'];data.queue[0].match.rules.challengesEnabled=true;
  data.officials.push({eventId:'e',id:'service',name:'Service Official'},{eventId:'e',id:'line',name:'Line Official'});
- show();fireEvent.click(await screen.findByRole('button',{name:'Call Next Match on Court 1'}));const dialog=screen.getByRole('dialog',{name:'Assign Court / Tablet'});
+ await show();fireEvent.click(await screen.findByRole('button',{name:'Call Next Match on Court 1'}));const dialog=screen.getByRole('dialog',{name:'Assign Court / Tablet'});
  expect((within(dialog).getByLabelText('Official 2') as HTMLSelectElement).value).toBe('service');expect((within(dialog).getByLabelText('Official 3') as HTMLSelectElement).value).toBe('line');expect(within(dialog).getByRole('switch',{name:'Challenge review available on this court'})).toBeTruthy();
 });
 
 test('session allocation filters calling and queue court choices',async()=>{
  data.queue[0].eligibleCourts=[2];
- show();await screen.findAllByRole('button',{name:'Assign to Court'});
+ await show();await screen.findAllByRole('button',{name:'Assign to Court'});
  expect(screen.queryByRole('button',{name:'Call Next Match on Court 1'})).toBeNull();
  fireEvent.click(screen.getAllByRole('button',{name:'Assign to Court'})[0]);
  const select=within(screen.getByRole('dialog',{name:'Assign Court / Tablet'})).getByLabelText('Assign court');
@@ -123,7 +126,7 @@ test('session allocation filters calling and queue court choices',async()=>{
 });
 test('no eligible session courts prevents assignment even when courts are free',async()=>{
  data.queue.forEach(q=>q.eligibleCourts=[]);
- show();const buttons=await screen.findAllByRole('button',{name:'Assign to Court'});
+ await show();const buttons=await screen.findAllByRole('button',{name:'Assign to Court'});
  expect(buttons.every(b=>(b as HTMLButtonElement).disabled)).toBe(true);
  expect(screen.queryByRole('button',{name:/Call Next Match/})).toBeNull();
 });
@@ -131,7 +134,7 @@ test('no eligible session courts prevents assignment even when courts are free',
 test.each(['F','D','N'] as const)('same-day calling remains available with session state %s and no start estimate',async sessionState=>{
  Object.assign(data.eventContext!,{sessionState,missingSessions:sessionState==='N',nextSession:null});
  data.queue.forEach(q=>{q.estimatedStart=null;q.waitingFor='No session-based start estimate';});
- show();
+ await show();
  const call=await screen.findByRole('button',{name:'Call Next Match on Court 1'});
  expect((call as HTMLButtonElement).disabled).toBe(false);
  expect(screen.getByText(/Matches scheduled for today may still start|matches scheduled for today may still start/)).toBeTruthy();
@@ -139,4 +142,22 @@ test.each(['F','D','N'] as const)('same-day calling remains available with sessi
  expect(screen.queryByRole('button',{name:'Call Next Match on Court 4'})).toBeNull();
  fireEvent.click(call);
  expect(screen.getByRole('dialog',{name:'Assign Court / Tablet'})).toBeTruthy();
+});
+
+test('venue-day boundaries and a remembered ID still require an explicit choice',async()=>{
+ localStorage.setItem('tls-dashboard-event','e');
+ const event=data.events[0];
+ data.events=[{...event,endDate:'2026-10-26'},{...event,id:'old',name:'Past',endDate:'2026-10-25'},{...event,id:'next',name:'Future',startDate:'2026-10-27'}];
+ render(<LiveDashboard onFixtures={()=>{}} onChanged={async()=>{}}/>);
+ const picker=await screen.findByLabelText('Dashboard event');
+ expect(within(picker).getAllByRole('option').map(o=>o.textContent)).toEqual(['Select an event','Test Event']);
+ expect(screen.queryByText(/Match Queue/)).toBeNull();
+ fireEvent.change(picker,{target:{value:'e'}});await screen.findByText(/Match Queue/);
+ data.serverLocalTime='2026-10-29T00:00:01';data.eventContext!.calendar='C';
+ await screen.findByText(/Event dates ended — unfinished matches/,{}, {timeout:5000});
+ expect(screen.getByText('Test Event')).toBeTruthy();
+ fireEvent.click(screen.getByRole('button',{name:'Change event'}));
+ await screen.findByText('No event is scheduled for today.');
+ expect(screen.queryByLabelText('Dashboard event')).toBeNull();
+ expect(screen.queryByText(/Match Queue/)).toBeNull();
 });

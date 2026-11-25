@@ -13,7 +13,7 @@ def call(path,body=None,status=200,method=None):
  raw=body if isinstance(body,bytes) else json.dumps(body).encode() if body is not None else None
  req=urllib.request.Request(base+path,data=raw,method=method or ('POST' if raw is not None else 'GET'),headers={'Content-Type':'application/octet-stream' if isinstance(body,bytes) else 'application/json'})
  try:
-  with urllib.request.urlopen(req,timeout=30) as response:code=response.status;content=response.read()
+  with urllib.request.urlopen(req,timeout=2 if path.startswith('setup') else 30) as response:code=response.status;content=response.read()
  except urllib.error.HTTPError as error:code=error.code;content=error.read()
  assert code==status,(path,code,status,content[:1200]);checks+=1
  return content if path=='setup/template' else json.loads(content)
@@ -29,7 +29,7 @@ def confirm(p,status=200):return call('setup/confirm',{'revision':p['revision'],
 def dates(eid,first,last,status=200,revision=None):return call('tournament/event-dates',{'revision':state()['revision'] if revision is None else revision,'eventId':eid,'startDate':day(first),'endDate':day(last)},status,'PUT')
 def mutate(path,body,status=200,method='PUT'):return call(path,{'revision':state()['revision'],**body},status,method)
 
-with socket.socket() as probe:assert probe.connect_ex(('127.0.0.1',5192))!=0
+with socket.socket() as probe:probe.settimeout(.5);assert probe.connect_ex(('127.0.0.1',5192))!=0
 db=TestDatabase()
 try:
  with tempfile.TemporaryDirectory(prefix='tls-event-dates-') as folder:
@@ -83,9 +83,12 @@ try:
     with ThreadPoolExecutor(max_workers=2) as pool:check(sorted(pool.map(commit_status,[left,right]))==[200,409])
     check(sum(e['startDate']==day(40) for e in state()['events'])==1)
     plan={'eventId':a,'courts':[1,2],'courtsConfigured':True,'dailySessions':[{'start':'10:00:00','end':'18:00:00'}],'officials':[{'id':'o','name':'Official One'}],'matchMinutes':30,'restMinutes':0}
-    mutate('tournament/event',{'plan':plan});dates(a,8,9);check(not call('tournament/'+a)['dailySessions']);dates(a,10,11)
+    mutate('tournament/event',{'plan':plan});dates(a,8,9,400);check(dates(a,10,12)['eventPlan']['dailySessions']==plan['dailySessions'])
     legacy={**plan,'dailySessions':[],'sessions':[{'date':day(d),'start':'10:00:00','end':'18:00:00'} for d in [10,11]]}
-    mutate('tournament/event',{'plan':legacy});dates(a,8,9);check(not call('tournament/'+a)['eventPlan']['sessions']);dates(a,10,11);mutate('tournament/event',{'plan':plan})
+    saved_sessions=mutate('tournament/event',{'plan':legacy})['eventPlan']['sessions']
+    check('Session at' in dates(a,8,9,400)['message'])
+    check(dates(a,10,11)['eventPlan']['sessions']==saved_sessions)
+    mutate('tournament/event',{'plan':plan})
     mutate('setup/settings',{'timeZone':state()['timeZone'],'courtCount':1});check(call('tournament/'+a)['eventCourts']==[1]) # Obsolete event pool [1,2] does not prevent a safe master change.
     mutate('setup/settings',{'timeZone':state()['timeZone'],'courtCount':4})
     pid=next(p['id'] for p in state()['programs'] if p['eventId']==a and p['entryType']=='S')
@@ -95,10 +98,17 @@ try:
      draft=mutate('tournament/preview',{'eventId':a,'programIds':[pid],'courts':[1,2],'earliestStart':day(10)+'T10:00:00','settings':{'format':'KO','groupCount':1,'advancePerGroup':1},'seeds':{e['id']:None for e in state()['entries'] if e['programId']==pid}},method='POST')
      check(call('tournament/'+a)['datesEditable']) # Unsaved previews do not lock dates.
      return mutate('tournament/confirm',{'token':draft['token']},method='POST')
-    draw=generate();check(not draw['datesEditable']);before=state();dates(a,8,9,400);check(state()==before)
-    mutate('tournament/reset',{'programId':pid},400,method='POST');m=next(p for p in draw['plans'] if p['programId']==pid)['matches'][0];mutate('tournament/reset-schedule',{'eventId':a,'roundKeys':[pid+':'+m['phase']+':'+str(m['round'])]},method='POST');check(call('tournament/'+a)['datesEditable']);mutate('tournament/reset',{'programId':pid},method='POST');dates(a,8,9);dates(a,10,11);mutate('tournament/event',{'plan':plan})
+    draw=generate();check(draw['datesEditable']);before=state();dates(a,8,9,400);check(state()==before)
+    mutate('tournament/reset',{'programId':pid},400,method='POST');m=next(p for p in draw['plans'] if p['programId']==pid)['matches'][0];mutate('tournament/reset-schedule',{'eventId':a,'fromDate':m['start'][:10]},method='POST');check(call('tournament/'+a)['datesEditable']);mutate('tournament/reset',{'programId':pid},method='POST');dates(a,8,9,400);mutate('tournament/event',{'plan':plan})
     draw=generate();m=next(p for p in draw['plans'] if p['programId']==pid)['matches'][0]
-    mutate('tournament/result',{'matchId':m['id'],'matchVersion':m['matchVersion'],'games':[{'a':5,'b':0}],'presetId':preset});check(not call('tournament/'+a)['datesEditable']);dates(a,8,9,400)
+    mutate('tournament/result',{'matchId':m['id'],'matchVersion':m['matchVersion'],'games':[{'a':5,'b':0}],'presetId':preset,'startedAt':day(11)+'T09:00:00','finishedAt':day(11)+'T09:30:00'})
+    before=call('tournament/'+a)
+    updated=mutate('tournament/event-settings',{'startDate':day(10),'endDate':day(12),'plan':before['eventPlan'],'publishing':None})
+    check(updated['datesEditable'] and updated['plans']==before['plans'] and updated['eventPlan']==before['eventPlan'])
+    snapshot=state()
+    error=dates(a,10,10,400)
+    check('Recorded play' in error['message'] and str(m['number']) in error['message'])
+    check(state()==snapshot)
     print(f'{checks} event-date/import calendar checks passed; disposable SQL removed on exit.')
    finally:
     if process:process.terminate();process.wait(timeout=10);process=None

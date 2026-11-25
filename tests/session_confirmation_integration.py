@@ -60,28 +60,8 @@ try:
  validate([{**target,'programLimits':{pid:0}}],400,index=0);check(state()==snap)
  validate([{**target,'programLimits':{pid:len(ids)+1}}],400,index=0);check(state()==snap)
  validate([target],400,index=-1);validate([target],400,index=1);check(state()==snap)
- # An unfinished overlapping/reversed/past second card cannot block saving the first card.
- unfinished=window(today,'22:00:00','21:00:00')
- draft=call('scheduling/draft',{'revision':rev(),'eventId':eid,'sessions':[target,unfinished],'sessionIndex':0,'dirtySessions':[1],'moveMatchIds':[]})
- savedDraft=view()['eventPlan']['planningDraft'];check(savedDraft['dirtySessions']==[1]);check(savedDraft['sessions'][1]==unfinished)
- check(all(not m.get('start') for plan in view()['plans'] for m in plan['matches']))
- validate([target,unfinished],400,index=1)
- overlap={**target,'start':'11:00:00','end':'13:00:00'}
- call('scheduling/draft',{'revision':rev(),'eventId':eid,'sessions':[target,overlap],'sessionIndex':1,'dirtySessions':[],'moveMatchIds':[]},400)
- check(view()['eventPlan']['planningDraft']==savedDraft)
- # A saved planning draft survives server restart and never publishes slots.
- draft_body={'revision':rev(),'eventId':eid,'sessions':[target],'sessionIndex':0,'dirtySessions':[],'moveMatchIds':[]}
- saved=call('scheduling/draft',draft_body);check(saved['revision']>draft_body['revision'])
- check(all(not m.get('start') for plan in view()['plans'] for m in plan['matches']))
- check(view()['eventPlan']['planningDraft']['sessions']==[target])
- call('scheduling/draft',draft_body,409)
- process.terminate();process.wait(timeout=10)
- process=subprocess.Popen(['dotnet',str(dll)],cwd=project,env={**db.env,'ASPNETCORE_URLS':base[:-5]},stdout=subprocess.DEVNULL,stderr=subprocess.STDOUT)
- for _ in range(120):
-  try:state();break
-  except urllib.error.URLError:time.sleep(.1)
- check(view()['eventPlan']['planningDraft']['sessions']==[target])
- check(all(not m.get('start') for plan in view()['plans'] for m in plan['matches']))
+ # Removed editing-state routes cannot persist partial forms.
+ call('scheduling/draft',{},404);check('planningDraft' not in view()['eventPlan'])
  # Past-time validation also applies to final preview/confirm, not just the session button.
  bad=window(today,'00:00:01','23:59:00',ids=ids,limits={pid:len(ids)})
  call('scheduling/preview',{'revision':rev(),'eventId':eid,'matchMinutes':40,'restMinutes':0,'sessions':[bad],'days':[{'date':today,'courts':bad['courts'],'matchIds':ids}]},400)
@@ -92,7 +72,7 @@ try:
   call('scheduling/confirm',{'revision':d['revision'],'token':d['token']},400);check(state()==snap)
  scheduled=window(tomorrow,'10:00:00','12:00:00',ids=ids,limits={pid:len(ids)})
  d=preview([scheduled]);call('scheduling/confirm',{'revision':d['revision'],'token':d['token']});snap=state()
- check(view()['eventPlan']['planningDraft'] is None)
+ check('planningDraft' not in view()['eventPlan'])
  validate([{**scheduled,'start':'11:00:00','programLimits':{pid:0}}],400);check(state()==snap)
  validate([{**scheduled,'courts':[2,3,4],'programLimits':{pid:0}}],400);check(state()==snap)
  validate([{**scheduled,'programLimits':{pid:0}}],index=0);check(state()==snap)

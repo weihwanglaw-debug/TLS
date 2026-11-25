@@ -150,6 +150,17 @@ Console.WriteLine($"PASS: {checks} total focused rules and qualifier placement c
     Check(publication.Matches[0].ScoreA==5 && publication.Matches[0].ScoreB==7 && publication.Matches[0].Games.Single()==new GameScore(21,19),"live publication aligns current and previous scores");
     Check(publication.Matches[0].Team1.Id=="entry:91" && publication.Matches[0].Team1.Players.Single()=="Alice","live publication describes original entry and players");
     Check(TrsPublication.Snapshot(publicationData,"EV000001","PUBLISH-P",false).Matches.Length==0,"unconfirmed live matches never enter official result snapshots");
+    publicationData.Programs.Add(publicationData.Programs[0] with { Id = "PENDING", Name = "Doubles" });
+    publicationData.ImportIdentities.Add("pending", new("EV000001", "program", "T02", "PENDING"));
+    var match = publicationData.ProgramPlans[0].Matches[0];
+    match.Status = "C";
+    match.WinnerId = "E1";
+    match.Start = new DateTime(2026, 11, 3, 14, 0, 0);
+    var eventResult = TrsPublication.Snapshot(publicationData, "EV000001", null, false);
+    Check(eventResult.Programs?.Length == 2 && eventResult.Programs.Any(p => p.Reference == "T02" && !p.CanLink),
+        "full results include pending workbook programs and preserve their references");
+    Check(eventResult.Matches is [{ ProgramId: 72, RoundLabel: "Final", MatchDate: "2026-11-03" }],
+        "event publication carries the program, round and date of confirmed results");
 }
 Console.WriteLine($"PASS: {checks} including TRS publication checks");
 
@@ -159,7 +170,7 @@ Console.WriteLine($"PASS: {checks} including TRS publication checks");
     var resetData = new SetupData { Events=[new("RESET-E","Reset test","Hall",new(2026,11,4),new(2026,11,4))],Programs=[new("RESET-P","RESET-E","Singles","Badminton","S",1,1,0,100,"O",2,32,"E")],ProgramPlans=[new() { ProgramId="RESET-P",Matches=[cleared] }] };
     Check(FixtureResets.Protection(resetData,[cleared])=="","cleared correction history does not block schedule reset");
     Check(!GamePresets.Locked(cleared),"history never locks scoring preset changes");
-    FixtureResets.ResetSchedule(resetData,new(0,"RESET-E",[FixtureResets.Key(cleared)]));
+    FixtureResets.ResetSchedule(resetData,new(0,"RESET-E",new(2026,11,4)));
     Check(cleared.Start is null&&cleared.End is null&&cleared.Court is null,"cleared match schedule can be removed");
     Check(cleared.Live!.Corrections.Count==0,"schedule reset removes operational correction history");
     FixtureResets.RequireScheduleReset(resetData,"RESET-E",[cleared]);
@@ -177,18 +188,17 @@ Console.WriteLine($"PASS: {checks} including cleared-result reset checks");
     var knockout=new TournamentMatch{Id="K",ProgramId="P",Phase="K",Round=1,EntryA="A",EntryB="C",Status="IP",Live=new(){StartedLocal=time}};
     var other=new TournamentMatch{Id="OTHER",ProgramId="Q",Phase="K",Round=1,EntryA="D",EntryB="E",Status="SC"};
     var session=new PlayingSession(resetDay,new(10,0),new(18,0),[1,2],["G","K","OTHER"],new(){{"P",2},{"Q",1}});
-    var ep=new EventPlan{EventId="E",Sessions=[session],PlanningDraft=new([session],[],["G","K","OTHER"],DateTimeOffset.UtcNow)};
+    var ep=new EventPlan{EventId="E",Sessions=[session]};
     var pp=new ProgramPlan{ProgramId="P",Phase="K",LastRound=1,Matches=[group,knockout],RankingDecisions=[new("A","old",["A","B"],"old",DateTimeOffset.UtcNow)],QualificationOrigins=new(){{"A","A1"}}};
     var data=new SetupData{CourtCount=2,Events=[new("E","Reset","Hall",resetDay,resetDay)],Programs=[new("P","E","Singles","Badminton","S",1,1,0,100,"O",2,32,"E"),new("Q","E","Other","Badminton","S",1,1,0,100,"O",2,32,"E")],ProgramPlans=[pp,new(){ProgramId="Q",Matches=[other]}],EventPlans=[ep],Venue=new(){Bindings=[new(){MatchId="G"},new(){MatchId="K"},new(){MatchId="OTHER"}]}};
-    FixtureResets.ResetSchedule(data,new(0,"E",["P:G:1"]));
-    Check(pp.Matches.SequenceEqual([group])&&pp.Phase=="G"&&pp.LastRound==0,"group reset removes derived knockout rounds and restores phase");
-    Check(group.Status=="SC"&&group.WinnerId is null&&group.Games.Count==0&&group.ResultKind=="N"&&group.OfficialReason=="","reset clears results and outcomes");
-    Check(group.Live!.Version==10&&group.Live.Resumptions.Count==0&&group.Live.Corrections.Count==0&&group.ActualStartedAt is null,"reset creates clean scoring state with increasing version");
-    Check(data.Venue.Bindings.Single().MatchId=="OTHER","reset releases affected tablets only");
-    Check(pp.RankingDecisions.Count==0&&pp.QualificationOrigins.Count==0,"reset removes derived ranking and qualifier state");
-    Check(ep.PlanningDraft!.MoveMatchIds.SequenceEqual(["OTHER"])&&ep.PlanningDraft.Sessions[0].MatchIds!.SequenceEqual(["OTHER"])&&ep.PlanningDraft.Sessions[0].ProgramLimits!.Count==1,"draft retains only unrelated allocations and moves");
-    FixtureResets.ResetSchedule(data,new(0,"E",["P:G:1"]));
-    Check(group.Status=="SC"&&data.ProgramPlans[1].Matches.Single()==other,"repeated reset remains valid and preserves other program");
+    try{FixtureResets.ResetSchedule(data,new(0,"E",resetDay));Check(false,"completed reset allowed");}catch(RuleException){Check(group.Status=="C"&&pp.Matches.Count==2,"blocked reset preserves results and draws");}
+    FixtureResets.ResetResult(data,group);FixtureResets.ResetResult(data,knockout);data.Venue.Bindings.RemoveAll(b=>b.MatchId!="OTHER");knockout.Start=time.AddHours(2);knockout.End=time.AddHours(3);knockout.Court=2;
+    FixtureResets.ResetSchedule(data,new(0,"E",resetDay));
+    Check(pp.Matches.SequenceEqual([group,knockout])&&pp.Phase=="K","date reset preserves all draw rounds and phase");
+    Check(group.Start is null&&knockout.Start is null&&group.Status=="SC","eligible bookings are cleared");
+    Check(data.Venue.Bindings.Single().MatchId=="OTHER","unaffected tablet reservations stay");
+    Check(pp.RankingDecisions.Count==1&&pp.QualificationOrigins.Count==1,"schedule reset preserves ranking and qualifier records");
+    try{FixtureResets.ResetSchedule(data,new(0,"E",resetDay));Check(false,"empty reset written");}catch(RuleException){Check(data.ProgramPlans[1].Matches.Single()==other,"empty range has no changes");}
     group.Start=time;group.End=time.AddHours(1);group.Court=1;
     Check(SessionCourts.EligibleCourts(data,ep,group,time.AddHours(12)).SequenceEqual([1,2]),"late same-day play permits open courts after session end");
     data.Venue.ClosedCourts=[2];Check(SessionCourts.EligibleCourts(data,ep,group,time.AddHours(12)).SequenceEqual([1]),"same-day flexibility retains closed-court restriction");
@@ -237,7 +247,9 @@ Console.WriteLine($"PASS: {checks} including complete reset lifecycle checks");
     Check(DisplayRows(now.AddHours(10)).Select(r=>r.GetProperty("id").GetString()).SequenceEqual(new[]{"overnight"}),"completed results expire at venue midnight, not UTC midnight");
     displayData.ProgramPlans.Single(p=>p.ProgramId=="E-P").Matches.Remove(latest);
     Check(DisplayRows()[0].GetProperty("id").GetString()=="earlier","deleting the latest result removes it immediately and exposes only the earlier valid result");
-    FixtureResets.ResetSchedule(displayData,new(0,"E",[FixtureResets.Key(earlier)]));
+    try{FixtureResets.ResetSchedule(displayData,new(0,"E",day));Check(false,"completed display result reset");}catch(RuleException){checks++;}
+    FixtureResets.ResetResult(displayData,earlier);FixtureResets.ResetResult(displayData,walkover);
+    FixtureResets.ResetSchedule(displayData,new(0,"E",day));
     Check(DisplayRows().Select(r=>r.GetProperty("id").GetString()).SequenceEqual(new[]{"overnight"}),"schedule reset removes completed cards without retaining a cached winner");
 }
 Console.WriteLine($"PASS: {checks} including audience completed-result display checks");

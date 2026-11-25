@@ -1,7 +1,7 @@
 import {cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
 import {afterEach,beforeEach,expect,test,vi} from 'vitest';
 import SetupApp from '../src/SetupApp';
-import {adminUrl,readAdminRoute} from '../src/admin-route';
+import {adminUrl,readAdminRoute,useAdminRoute} from '../src/admin-route';
 
 const service=vi.hoisted(()=>({api:vi.fn()}));vi.mock('../src/api',()=>service);
 vi.mock('../src/LiveDashboard',()=>({default:({onEventSettings}:any)=><button onClick={()=>onEventSettings('e:1')}>Open event settings</button>}));
@@ -54,4 +54,12 @@ test('participant filters, import pages and missing records have usable direct a
  fireEvent.click(screen.getByRole('button',{name:'Event'}));fireEvent.click(await screen.findByRole('button',{name:'Import Excel'}));await screen.findByText('Import excel');expect(location.pathname).toBe('/events/import/excel');
  fireEvent.click(screen.getByRole('button',{name:'Cancel import'}));await screen.findByRole('heading',{name:'Event'});expect(location.pathname).toBe('/events');
  app.unmount();history.replaceState(null,'','/events/deleted');render(<SetupApp/>);await screen.findByText(/This address is invalid/);fireEvent.click(screen.getByRole('button',{name:'Go to Dashboard'}));expect(location.pathname).toBe('/dashboard');
+});
+
+test('browser Back can retain unsaved scheduling work and proceed after confirmation',async()=>{
+ let allowed=true;const guard=vi.fn(()=>allowed);
+ function Driver(){const {route,go}=useAdminRoute(guard);return <><p data-testid="guarded-route">{route.page}</p><button onClick={()=>go({page:'fixtures',eventId:'e',step:'schedule'})}>Open schedule</button></>;}
+ history.replaceState(null,'','/events');render(<Driver/>);fireEvent.click(screen.getByRole('button',{name:'Open schedule'}));await waitFor(()=>expect(location.pathname).toBe('/fixtures/e'));
+ allowed=false;history.back();await waitFor(()=>expect(guard).toHaveBeenCalledOnce());await waitFor(()=>expect(location.pathname).toBe('/fixtures/e'));expect(screen.getByTestId('guarded-route').textContent).toBe('fixtures');
+ allowed=true;history.back();await waitFor(()=>expect(screen.getByTestId('guarded-route').textContent).toBe('events'));
 });

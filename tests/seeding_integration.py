@@ -11,7 +11,7 @@ def call(path,body=None,method=None,expect=200,headers=None):
  if body is not None and not isinstance(body,bytes):body=json.dumps(body).encode();headers={'Content-Type':'application/json',**(headers or {})}
  req=urllib.request.Request(base+'api/'+path,data=body,method=method or ('POST' if body is not None else 'GET'),headers=headers or {})
  try:
-  with urllib.request.urlopen(req,timeout=30) as r:status=r.status;raw=r.read()
+  with urllib.request.urlopen(req,timeout=2 if path.startswith('setup') else 30) as r:status=r.status;raw=r.read()
  except urllib.error.HTTPError as e:status=e.code;raw=e.read()
  assert status==expect,f'{path}: expected {expect}, got {status}: {raw[:200]!r}'
  checks+=1;return json.loads(raw) if raw else None
@@ -29,7 +29,7 @@ def state():return call('setup/')['data']
 def get(pid):return call('seeding/'+pid)
 def save(pid,seeds,mode='M',expect=200,**extra):return call('seeding/'+pid,{'revision':state()['revision'],'seeds':seeds,'mode':mode,**extra},'PUT',expect)
 
-with socket.socket() as p:assert p.connect_ex(('127.0.0.1',5201))!=0
+with socket.socket() as p:p.settimeout(.5);assert p.connect_ex(('127.0.0.1',5201))!=0
 process=None;db=TestDatabase()
 try:
  with tempfile.TemporaryDirectory(prefix='tls-seed-'):
@@ -77,8 +77,8 @@ try:
   check(get(single)['locked']);save(single,manual,expect=400)
   a=get(single);call('seeding/'+single+'/suggest',{'revision':a['revision'],'seedCount':1,'rankingFingerprint':a['rankingFingerprint']},expect=400)
   check(get(single)['entries'][1]['ranking']['accumulatedScore']==950)
-  keys=[r['key'] for r in call('tournament/'+eid+'/reset-schedule')['rounds'] if not r['reason']]
-  call('tournament/reset-schedule',{'revision':state()['revision'],'eventId':eid,'roundKeys':keys})
+  resetRange=call('tournament/'+eid+'/reset-schedule')
+  call('tournament/reset-schedule',{'revision':state()['revision'],'eventId':eid,'fromDate':resetRange['fromDate']})
   call('tournament/reset',{'revision':state()['revision'],'programId':single},'POST');check(not get(single)['locked'])
   save(single,{id:None for id in ids},'N');check(call('tournament/'+eid)['plans'][0]['rankingSnapshot']==[])
   final=state();check({k:final[k] for k in original}==original)

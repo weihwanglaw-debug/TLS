@@ -1,73 +1,110 @@
-# Whole-tournament schedule planner — 16 November 2026
+# Event scheduling â€” 17 November 2026
 
-This is the current scheduling workflow. It supersedes the event-wide duration and current-round-only UI described in older scheduling notes. Draw/seeding, live scoring and normal result-confirmation progression remain separate.
+This is the current scheduling contract. It replaces the saved-draft and partial-event saving workflows described in earlier notes.
 
-## Operator steps
+## Operator workflow
 
-1. Generate opening draws for the active badminton singles/doubles programs. The planner derives playable group and knockout rounds, including future rounds. Byes consume no court time. Missing draws are named; full Auto Assign/confirmation waits for them, while manual draft work remains available.
-2. Open Schedule. **Match durations:** set minutes per program/round. Include warm-up and changeover. Configure a preferred rest gap; this is advisory, not a compulsory break. Existing booked rounds are locked; reset the relevant schedule before changing estimates. Historical logs do not control this lock.
-3. **Sessions:** set actual dates, start/end and specific open courts. Sessions on one date never overlap, even on different courts. Save availability as a draft. No match bookings are made by saving a session.
-4. **Assign matches:** choose a session and use round −/+ controls, or Auto Assign remaining. A later round follows the complete preceding round's planned completion. Group qualification slots and future winners remain planning references, not invented entries or results.
-5. **Review & confirm:** timetable grouped by date with a program filter. Totals and validation always cover the whole plan. Check the complete timetable, review actionable warnings, then confirm. The page becomes Manage schedule. Existing fixture/results screens show materialized match bookings; future planning references remain in the planner until normal progression generates those matches.
+1. **Program setup and Draw:** complete the opening draw for each active badminton singles/doubles program. Future rounds use winner/qualifier positions; results are not required to plan them. Missing draws are listed before schedule configuration starts.
+2. **Schedule â†’ Durations:** set minutes per program/round, including warm-up and changeover; preferred rest warning (0â€“240 minutes); start-time steps (5, 10 or 15 minutes, default 15).
+3. **Sessions:** configure real dates, opening/closing times and courts. Sessions cannot overlap, even on different courts. Apply session updates only to the current page configuration.
+4. **Assign matches:** add matches to the selected session or Auto Assign remaining. Usable openings are displayed per court, aligned to the selected clock grid. A match must fit one continuous opening; separate court/gap balances cannot be combined into a match slot.
+5. **Review â†’ Save schedule:** every playable match must be placed. Review actionable warnings once, then save all sessions, estimates, settings and current/future bookings in one transaction. Incomplete saves are rejected, including after a date-onward reset.
+6. **Manage schedule:** validated moves/swaps save selected bookings atomically. Results are event-wide, grouped by program with each program's own actions. Program selection appears inside Seeding and Draw only.
 
-Save draft and step navigation retain the current planning configuration. Routine saving uses inline feedback. Clear draft allocation removes only unconfirmed placements, keeping confirmed bookings, sessions and estimates. Reload saved draft explicitly replaces local unsaved changes. Browser refresh returns saved state; use Save draft before leaving via browser navigation. The in-page Back action saves a valid configured draft before leaving.
+There is one event heading and one primary fixture navigation bar. Schedule's compact Durations / Sessions / Assign matches / Review navigation sits below its main section. Footer navigation names the destination. Necessary guidance uses the shared `ui-help` presentation beside the affected control; routine explanatory paragraphs are omitted.
 
-## Placement rules
+Session date/start/end reuse the existing `DatePicker` and `TimePicker`; match moves reuse `DateTimePicker`, as result-entry screens do. Picker display follows the existing AM/PM design while payloads retain venue-local values. Start-time grid and session validation remain server-side. The frontend UI consistency guard rejects native date/time picker inputs; run it with the normal Vitest suite. Any shared-component-internal exception requires explicit approval.
 
-- Every newly planned start uses a **15-minute grid**. Earliest legal start is rounded up; durations remain exact. A 40-minute match finishing at 14:40 plus 30 minutes preferred rest gives a 15:15 start. Manual moves/swaps use the same grid.
-- Session availability can start/end at any minute; the 15-minute grid applies to match starts, not the venue's opening hours. Unchanged legacy bookings keep their saved times; a changed/new placement follows the grid.
-- Auto Assign preserves current placements. It tries preferred rest and separation for possible shared players, then alternative program order, then relaxes speculative separation, and finally preferred rest. Finals target the last playing date, with an earlier date reported as a warning when needed.
-- Initial automatic allocation is all-or-nothing: if any remaining match cannot be placed, no new automatic placements are applied. Sessions and the current draft remain. Manual allocation may be incomplete while editing. Initial confirmation requires every playable slot in included active programs.
-- The search is bounded: six deterministic preference/order attempts, at most2,000,000 candidate court checks per attempt and an 8-second overall placement budget. Failure means no complete solution was found within that search, not mathematical proof of impossibility. Add availability or adjust manual choices.
-- Court-minute totals are an availability budget, not a match-count capacity guarantee. Separate short gaps cannot fit a longer match.
-- Same court, known-player or known-official overlaps and unmet dependencies are errors. Rest below preference and guaranteed knockout-winner rest are warnings the admin may accept using **one shared acknowledgement**. Possible qualifier clashes/rest are collapsed information with a count and **never require acknowledgement or block confirmation**. Group qualification rest is speculative until the actual qualifier is known.
+## Save and leave behaviour
 
-## Changes after confirmation
+There is no Save draft or Reload draft, persisted editing buffer, draft endpoint or legacy scheduler UI. Only a complete-event save persists schedule preparation. Applying a session or navigating schedule substeps writes no business data. Unsaved page work is lost on refresh, closure or crash; browser leave, sidebar/main-step navigation, Back and Refresh are guarded where the app can intercept them. A browser crash cannot be prevented. Local form state and short-lived review tokens are not recovery storage.
 
-Choose Change on an unstarted match:
+Changing timing settings after allocation may invalidate placements. Start-time steps are locked while current bookings or walkover slot references exist. Round durations stay locked while that round has any retained booking or walkover reference, including on dates before a reset cutoff. Unconfirmed placements must be cleared before changing their start-time grid or duration. History/audit counts never determine eligibility.
 
-- Move: choose venue-local date/time and court inside a saved session.
-- Swap: exchange starts/courts with another eligible match.
+## Event dates
 
-Both retain each match's own duration. Unequal-duration swaps are valid only if both resulting intervals fit. Check shows the proposed changed rows and warnings. Apply changes to the draft, then check and confirm the full timetable to save current bookings atomically. No neighbouring matches move silently.
+Edit Event can extend the date range after play starts or remove unused dates. Save validates inclusive event overlap, sessions (including legacy daily windows), current and future bookings, and actual play dates. It preserves the timetable and results. Remove an unused dated session or move unplayed matches before excluding their date. Legacy daily windows repeat across an extended range.
 
-Called matches must be released first. Playing/completed matches are fixed. Reset is a separate explicit action and uses existing result-reset semantics: selected and dependent later schedules/results are cleared, while draw structure, session availability and duration settings remain. Future-only round bookings can also be reset. No audit-history condition keeps a cleared round locked.
+## Reset schedule from date
 
-**Planned times are estimates during play.** TLS calls matches through the live queue. Delays do not automatically rewrite the timetable. No shift-everything operation is introduced.
+Reset Schedule reuses the shared date picker and dialog. Choose From date within the event, review affected dates/counts, then Confirm reset. The cutoff is inclusive and uses each booking's venue-local start date. Reset stays disabled while the planner has unsaved edits; save or clear those edits first.
 
-## Future rounds and live checks
+Every affected actual match is rechecked transactionally. Any called, started, awaiting-confirmation, completed or walkover match blocks the entire operation; the preview identifies the match, date, court and reason. No partial clearing occurs. Earlier-day results and calls do not block clearing later dates. Structural BYEs are excluded. Audit/correction history alone does not block an unstarted match.
 
-Slot identity is program/phase/round/position, with a source-draw fingerprint. Slots contain source-match/qualifier labels and potential player sets. They do not create TournamentMatch records before normal draw progression. When confirmed results and any group tie decisions allow the existing progression to generate a round, the existing slot binds to the real match exactly once and transfers its confirmed start/court/duration.
+An eligible reset clears real and future-only time/court bookings from the selected date onward, affected officials/review availability and current empty scoring buffers. It retains earlier bookings/results/calls byte-for-byte, every draw/pairing, qualifiers, seeds, sessions/courts and duration/rest/grid settings. Invalidated walkover timing references are removed. No dependent draw rounds or results are deleted. Select the event's first date to clear the whole schedule, subject to the same protections. Empty ranges, invalid dates and stale revisions reject without changes.
 
-For the common two-groups/two-qualifiers format, labels identify group winner vs opposite runner-up. Other qualifying formats use neutral qualifier-slot labels because seed-based placement is not yet resolved; candidate membership is conservative. Planned byes are excluded from court booking count.
+After success, return to Assign matches with the selected/later session in view. Reassignment still requires a complete event timetable before Save. Auto Assign remains an event-wide allocation action; a date reset itself never reallocates any match. Result correction and draw reset remain separate explicit workflows.
 
-On actual qualification, the planner recalculates known player sets. Dashboard queue messages name known overlaps; calling/starting a conflicting match is rejected until adjusted. Other matches remain usable. Dashboard rest notices are advisory; they do not force a rest gap or shift bookings. An active player's match must finish/release before another match for that player can be called.
+## Allocation and validation
 
-## Persistence and API compatibility
+- Starts align to venue-local clock steps, rounded upward. Durations remain exact. With 15-minute steps, two 40-minute games at 14:00 and 14:45 leave the next usable start at 15:30. With 5-minute steps they can start at 14:00 and 14:40.
+- Per-court openings replace the old estimated match-count capacity display. Adding a match that cannot fit returns a concise error without changing any placements. The admin decides whether to extend a session or add availability.
+- Auto Assign keeps existing placements and either fits every remaining match or applies nothing. It prioritises eligible known players entered in multiple programs. Round dependencies always take precedence.
+- It tries preferred rest and possible-player separation, then relaxes speculative separation and preferred rest. Known player/official overlaps are avoided by Auto Assign. Finals prefer the last configured playing date.
+- The bounded search has six preference/order attempts with a 1.3-second allowance and 2,000,000 candidate checks per attempt. Failure means no solution found within the search, not proof of impossibility.
+- Court overlaps, invalid dates/courts, session boundaries, duration/grid changes and unmet round dependencies are errors. Known planned player/official overlaps and short rest are actionable warnings the admin can accept. Possible future-player conflicts are collapsed information and do not require acknowledgement.
+- Future references are keyed by program/phase/round/position. They create no fake match records. Normal result progression binds reserved times to generated real matches. Redraw/reset removes affected bookings and preserves unrelated sessions/estimates/bookings.
+- Newly placed matches use open courts. Existing unchanged closed-court bookings warn, so repairs elsewhere remain possible. Other events' actual and future-only reservations are checked; normal setup also prohibits overlapping event dates.
 
-EventPlan adds optional `schedulePlanner` JSON containing one draft, confirmed future-booking references, round minutes, rest-warning preference and source fingerprints. Existing EventOperation JSON storage is reused. Actual match Start/End/Court/DurationMinutes remain authoritative once a slot materializes. No table, column or migration is added.
+## Saved edits and walkovers
 
-New local-admin endpoints under `/api/scheduling/planner`:
+Move changes one match's time/court using the shared date/time picker. Swap follows the draw interaction: select the swap icon beside the first match, then the second. The first row highlights; clicking it again or Cancel selection cancels. The selection remains visible when filtering programs. There is no swap dropdown in the move dialog. Selecting the second match always opens a persistent confirmation dialog showing both current and proposed times/courts. Nothing is exchanged until **Confirm swap**, including for unsaved placements. Cancel closes the dialog without changing the timetable. Saved swaps are validated by the API on confirmation; if warnings are returned, the dialog stays open for acknowledgement and confirmation. Validation failures also keep it open without changing either booking.
 
-| Route | Purpose |
-|---|---|
-| GET `/{eventId}` | Slots, current draft/bookings, preparation gaps and findings |
-| POST `/draft` | Save incomplete configuration without booking matches |
-| POST `/preview` | `check`, `add` or complete `auto`; no persistent mutation |
-| POST `/confirm` | Validate latest state and atomically save reviewed placements |
-| POST `/reset` | Explicit round reset, including future-only slots |
+Swaps require equal estimated durations, including across programs. Same-program swaps also require the same stage and round. Incompatible choices are disabled with a concise reason, and the API independently rejects them. Valid swaps exchange times and courts without changing teams or draw positions; sessions, dependencies and court availability are still validated. Called matches must be released first; playing/completed/walkover matches cannot swap. Warnings relevant to a saved swap require acknowledgement in the existing shared dialog. A valid saved swap applies atomically; unsaved swaps remain local until the complete-event save. Invalid changes save nothing.
 
-Preview tokens expire after 10 minutes and are single-use after confirmation. Definitive errors leave the draft/bookings intact. Match state is rechecked at confirmation, so calling/starting a match since preview cannot move it inadvertently. Existing request revision checks remain; scoring changes use existing per-match versions. History counts never determine eligibility.
+**Record walkover** reuses the existing team-selection panels in a compact winner-only dialog. It omits scoring presets, timestamps, officials and optional score details. The admin selects the winner and confirms. Normal score/result correction screens retain their existing controls. Standings and advancement rules still apply; a group win does not itself guarantee qualification. Existing `WO`/`W` codes release court capacity and any tablet reservation. The original timetable row stays visible, marked Walkover with its winner highlighted, released time and inline Undo action; there is no separate walkover list.
 
-Legacy scheduling endpoints remain available with their old contracts. The former frontend implementation remains a named legacy export for regression coverage; the application entry uses the new planner. Legacy saved daily sessions receive explicit court defaults on planner read. The event-wide estimate remains readable as a fallback for old/unconfigured round data, but is no longer an editable Event Settings control. Existing bookings are not silently regenerated.
+**Move remaining matches earlier?** appears after recording, with Keep times and Review earlier times. It is also available beside an existing walkover until earlier times have been applied. The preview moves only uncalled/unstarted bookings on the same court within the same session, never crossing a called/playing/completed match. It respects current venue time, the selected start grid, exact durations, preceding rounds on all courts, court availability and session limits. Matches that cannot move retain their times with an expandable reason. Known player/rest warnings need acknowledgement; possible conflicts remain information. Nothing moves before Confirm earlier times. A stale or changed preview applies nothing and can be reviewed again. Recording the walkover is independent: declining or failing retiming keeps the result.
 
-The dashboard queue adds optional `scheduleWarnings`; existing queue fields and tablet contracts remain intact. When using the new planner, legacy manual override validation also enforces the 15-minute start grid.
+**Undo walkover** uses versioned result correction. It validates the original slot and restores any times changed by that walkover in one transaction. Only compact before/after bookings are retained in `schedulePlanner.walkoverMoves`, keyed by the existing walkover match ID. Undo checks that affected bookings still match the saved after-values and remain uncalled/unstarted; it never overwrites subsequent edits or results. Successful undo removes its timing reference. Consecutive walkovers retain independent references and can be undone in reverse order. Explicit resets/redraws clean invalidated references; historical audit records never determine eligibility. Unplayed dependent draw records may be rebuilt while unaffected reserved times remain. Later started/scored/called dependent matches require explicit result correction.
 
-## Verification and rollback
+## Live calls and starts
 
-Focused rule tests cover full trees/byes, rest preferences, exact durations/grid, atomic no-fit, manual preservation, RR/group qualification and 120-match scheduling. SQL integration covers persistence/restart, real qualifier materialization, stale tokens, duration locks and reset cleanup. Frontend tests cover the four-step UI, filtering, warnings, failed auto assignment and move checks. Real-browser checks use disposable SQL/API and built frontend assets; no operational tournament records are test fixtures.
+Planned times are estimates. The live queue does not shift the timetable when matches run late. Planned overlaps/rest appear as alerts and may be retained.
 
-Deploy matching frontend/backend only after review. This task builds but does not publish web assets or restart normal services. There is no database migration.
+Calling checks current players and every assigned official role against called, playing and result-review court reservations. Messages identify the person and court. Starting rechecks availability. An overlapping planned time alone does not block a call when the resources are actually free. Tablet replacement for the same match retains existing live protections.
 
-**Rollback requires care:** shared JSON deserialization rejects unknown fields. An older API binary cannot safely read JSON containing `schedulePlanner`. Before any future deployment, retain a pre-change operational backup. Restoring the preceding application requires either that matching backup or a separately reviewed conversion removing only the new planner property after preserving materialized match times. Never blindly install older binaries on newly written planner data. No rollback data conversion is run by this task.
+## API and storage
 
+`GET /api/scheduling/planner/{eventId}` returns nodes, `plan`, confirmed bookings, findings, preparation gaps and walkover result references. `plan` contains sessions, round minutes, rest warning, placements and `startStepMinutes`.
+
+- `POST /preview`: validate, add one match or allocate all remaining matches; no persistence.
+- `POST /confirm`: single-use reviewed token, revision and warning acknowledgement; complete-event transaction.
+- `POST /change`: atomic saved move/swap; returns `saved:false` with warnings until acknowledged.
+- `POST /reset-preview`: revision, event ID and `fromDate`; read-only date/count/blocker preview.
+- `POST /reset`: revision, event ID and `fromDate`; atomic protected date-onward booking reset, including future-only references.
+- `POST /earlier-preview`: revision, event ID and walkover match ID; returns a ten-minute token, before/after bookings, unchanged reasons and findings without persistence.
+- `POST /earlier-confirm`: token, revision and warning acknowledgement; rechecks live state/current time and applies the reviewed batch atomically.
+
+Review tokens expire after ten minutes. The UI obtains a fresh preview before saving and requires another review if findings changed. Global revisions and live match state are rechecked. Removed `/draft` routes are unavailable. Remaining legacy scheduling writers reject planner-owned events; the active application uses one scheduler.
+
+The legacy `GET /api/tournament/{eventId}/reset-schedule` now returns the same date preview (optional `fromDate` query). Its POST reset route enforces the same date rules. Old `roundKeys` payloads are rejected; neither route can silently clear results. Schedule reset uses the current revision and rechecks live state at commit; it does not use a persistence draft or alter the database schema.
+
+Existing SQL `EventOperations` JSON stores settings/future bookings and optional compact walkover timing references; materialized match times remain authoritative in `ProgramOperations`. Walkover responses add the original booking, winner side and whether earlier times were applied. No table/column migration is introduced. Optional `startStepMinutes` defaults to 15 and `walkoverMoves` defaults empty for preceding data. Roll back matching code and JSON together because older strict readers do not accept the new member.
+
+## Upgrade, backup and rollback
+
+The strict JSON reader requires removal of obsolete `planningDraft` and `schedulePlanner.draft` properties before the new API starts. Stop the API first. Run the reviewed utility with the configured TLS connection:
+
+```powershell
+Set-Location D:/Source/TLS/Backend/LiveScore.Api
+dotnet bin/Debug/net8.0/LiveScore.Api.dll --upgrade-schedule true --backup-file C:/path/to/new-event-operations-backup.json
+```
+
+The backup file must not exist. The utility locks scheduling storage, writes all prior EventOperations rows to that file, removes only the obsolete properties, advances the revision when needed, and commits atomically. It is idempotent with a new backup path and changes no tables, actual match times, results, participants or payments. Do not promote unfinished old editing data to confirmed bookings.
+
+Retain matching API/frontend sources and the pre-upgrade JSON backup. Older strict binaries may reject new members. Rollback requires restoring matching event JSON in a controlled transaction and invalidating client revisions, or restoring a matching database backup. Do not blindly replace binaries, rewind revisions or overwrite later scoring work. Test databases and temporary browser files must remain outside operational data.
+
+## Verification
+
+Focused checks cover whole trees/byes, grids, openings, multi-program priority, full-save atomicity, soft planning alerts, active player/official reservations, same-round swaps, walkover release/undo, reset, qualification binding, restart and backed-up JSON cleanup. UI verification covers hierarchy, scope, concise guidance, both themes, guarded navigation, confirmation and direct saved edits. Test SQL databases are disposable.
+
+17 November verification: backend build passed with zero warnings/errors; frontend production build passed with the existing bundle-size advisory. All 256 frontend tests, 158 existing rule checks, 67 planner rule checks, 240 planner HTTP/data checks and 256 live HTTP assertions passed. Reset and session suites passed 213 and 117 checks respectively. Browser verification exercised a 26-match mixed group/knockout event, complete save, walkover/undo, eligible swaps, both themes and widths 1280/1024/768/390 without page errors or outer overflow.
+
+The subsequent shared-picker and two-selection swap correction passed 273 frontend tests, 158 existing plus 71 planner rule checks, 251 planner HTTP/data checks and 228 legacy group-scheduling checks. Both builds passed. Browser checks verified selection/cancellation, filtering, disabled incompatible choices, saved two-booking swaps and warning acknowledgement in both themes at 1280/768/390; operational writes were intercepted. No database schema change was required.
+
+The explicit swap-confirmation correction passed all 275 frontend tests and the production build. Browser checks confirmed that the dialog remains open before confirmation, cancelling makes no save request, and warning acknowledgement still works in both themes at 1280/768/390.
+
+The inline walkover/earlier-time workflow passed 283 frontend tests, 158 existing plus 86 planner rule checks, 264 planner HTTP/data checks, 147 dedicated walkover scheduling checks and 213 reset checks. Both builds passed. Real-browser checks against disposable SQL exercised winner-only entry, inline status/undo, Keep times, preview without writes, warning acknowledgement, earlier save and full undo in both themes at 1280/768/390. Group qualification slots, consecutive walkovers, restart persistence, stale confirmations and called/moved-booking protections are covered.
+
+20 November date-onward reset verification: backend and frontend builds passed; 291 frontend tests, 159 existing plus 96 planner rule checks, 150 date-reset, 317 planner, 154 walkover, 269 live, 162 event-date, 226 fixture/result, 125 seeding and 154 tournament API/data assertions passed. Browser verification used real disposable SQL in both themes at 1280/768/390: month-boundary date selection, named blockers, earlier completed result retained, preview/cancel without writes, confirmation, preserved draws/sessions and return to assignment. Old round-based reset payloads remain only in negative contract tests.

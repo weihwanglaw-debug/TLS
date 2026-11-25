@@ -3,12 +3,11 @@ namespace LiveScore.Api;
 
 public sealed record SchedulePreviewRequest(long Revision,string EventId,List<PlayingSession> Sessions,int MatchMinutes,int RestMinutes,List<ScheduleDay> Days,string[]? MoveMatchIds=null);
 public sealed record SessionValidationRequest(long Revision,string EventId,List<PlayingSession> Sessions,int? SessionIndex=null,int[]? DirtySessions=null);
-public sealed record ScheduleDraftRequest(long Revision,string EventId,List<PlayingSession> Sessions,int SessionIndex,int[] DirtySessions,string[] MoveMatchIds);
-public sealed record PlanningDraft(List<PlayingSession> Sessions,int[] DirtySessions,string[] MoveMatchIds,DateTimeOffset SavedAt);
 public static class ScheduleEndpoints
 {
     private sealed record Preview(long Revision,string EventId,EventPlan Plan,List<TournamentMatch> Matches,DateTimeOffset Expires,string[] Moves,List<UnslottedMatch> Unplaced,int Kept);
     private static readonly ConcurrentDictionary<string,Preview> Previews=new();
+    private static void EnsureLegacy(SetupData s,string eventId){if(TournamentRules.Event(s,eventId).SchedulePlanner is not null)throw new RuleException("This event uses the tournament planner. Reload Schedule to make changes.",409);}
     public static void Map(WebApplication app)
     {
         SchedulePlannerEndpoints.Map(app);
@@ -21,22 +20,9 @@ public static class ScheduleEndpoints
             ValidateSession(s,request);
             return new{valid=true};
         });
-        group.MapPost("/draft",(ScheduleDraftRequest request,SetupStore store)=>
-        {
-            var saved=store.Change(request.Revision,"SCHEDULE_DRAFT",s=>
-            {
-                TournamentRules.Need(s.Events.Any(e=>e.Id==request.EventId),"Event not found.");
-                TournamentRules.Need(request.DirtySessions is not null&&request.DirtySessions.All(i=>i>=0&&i<request.Sessions.Count&&i!=request.SessionIndex),"Invalid unfinished session.");
-                ValidateSession(s,new(request.Revision,request.EventId,request.Sessions,request.SessionIndex,request.DirtySessions));
-                var eventMatches=TournamentScheduler.Matches(s).Where(m=>s.Programs.Any(p=>p.Id==m.ProgramId&&p.EventId==request.EventId)).Select(m=>m.Id).ToHashSet();
-                TournamentRules.Need(request.MoveMatchIds.All(eventMatches.Contains),"Choose matches belonging to this event.");
-                TournamentRules.Event(s,request.EventId).PlanningDraft=new(request.Sessions,request.DirtySessions,request.MoveMatchIds,DateTimeOffset.UtcNow);
-            });
-            return new{saved.Revision};
-        });
         IResult Calculate(SchedulePreviewRequest request,SetupStore store)
         {
-            var result=ScheduleCalculation.Calculate(store.Read(),request);
+            var snapshot=store.Read();EnsureLegacy(snapshot,request.EventId);var result=ScheduleCalculation.Calculate(snapshot,request);
             var plan=result.Plan;var additions=result.Matches;var unplaced=result.Unplaced;var kept=result.Kept;var moves=request.MoveMatchIds??[];
             foreach(var old in Previews.Where(x=>x.Value.Expires<DateTimeOffset.UtcNow))Previews.TryRemove(old.Key,out _);
             TournamentRules.Need(Previews.Count<50,"Too many schedule previews. Let older previews expire.");
@@ -47,6 +33,7 @@ public static class ScheduleEndpoints
         group.MapPost("/preview",(SchedulePreviewRequest request,SetupStore store)=>Calculate(request,store));
         group.MapPost("/swap",(ScheduleSlotSwap request,SetupStore store)=>
         {
+            EnsureLegacy(store.Read(),request.EventId);
             if(request.Token is null)
             {
                 var saved=store.Change(request.Revision,"SCHEDULE_SLOT_SWAP",s=>ScheduleSlotSwaps.Apply(s,TournamentRules.Event(s,request.EventId),request.MatchA,request.MatchB),auditView:s=>new{matches=TournamentScheduler.Matches(s).Where(m=>m.Id==request.MatchA||m.Id==request.MatchB).ToArray(),plan=TournamentRules.Event(s,request.EventId)});
@@ -58,6 +45,7 @@ public static class ScheduleEndpoints
                 TournamentRules.Need(Previews.ContainsKey(request.Token)&&preview.Expires>=DateTimeOffset.UtcNow&&preview.Revision==request.Revision&&preview.EventId==request.EventId,"Schedule preview expired or changed. Preview again.");
                 TournamentRules.Need(preview.Matches.Any(m=>m.Id==request.MatchA)&&preview.Matches.Any(m=>m.Id==request.MatchB),"Choose two matches from this preview.");
                 var s=store.Read();SetupStore.CheckRevision(s,request.Revision);
+                EnsureLegacy(s,preview.EventId);
                 var plan=System.Text.Json.JsonSerializer.Deserialize<EventPlan>(System.Text.Json.JsonSerializer.Serialize(preview.Plan,JsonDefaults.Options),JsonDefaults.Options)!;
                 TournamentRules.Save(s.EventPlans,plan,p=>p.EventId);
                 foreach(var proposed in preview.Matches)
@@ -79,9 +67,9 @@ public static class ScheduleEndpoints
                 TournamentRules.Need(Previews.ContainsKey(request.Token)&&preview.Expires>=DateTimeOffset.UtcNow&&preview.Revision==request.Revision,"Schedule preview expired or changed. Preview again.");
                 var saved=store.Change(request.Revision,"EVENT_SCHEDULE",s=>
                 {
+                    EnsureLegacy(s,preview.EventId);
                     var plan=System.Text.Json.JsonSerializer.Deserialize<EventPlan>(System.Text.Json.JsonSerializer.Serialize(preview.Plan,JsonDefaults.Options),JsonDefaults.Options)!;
                     ScheduleCalculation.ValidateSessionStarts(s,TournamentRules.Event(s,preview.EventId),plan.Sessions);
-                    plan.PlanningDraft=null;
                     plan.Sessions=plan.Sessions.Select(w=>w.ProgramLimits is null?w:w with{ProgramLimits=w.ProgramLimits.ToDictionary(x=>x.Key,x=>Math.Max(0,x.Value-preview.Matches.Count(m=>m.ProgramId==x.Key&&m.Start>=w.Date.ToDateTime(w.Start)&&m.End<=w.Date.ToDateTime(w.End)&&(w.Courts?.Contains(m.Court??0)??true))))}).ToList();
                     TournamentRules.Save(s.EventPlans,plan,p=>p.EventId);
                     foreach(var proposed in preview.Matches)
@@ -106,6 +94,7 @@ public static class ScheduleEndpoints
             TournamentRules.Need(dirty.All(i=>i>=0&&i<request.Sessions.Count&&i!=request.SessionIndex),"Invalid unfinished session.");
             if(request.SessionIndex is int chosen)TournamentRules.Need(chosen>=0&&chosen<request.Sessions.Count,"Choose a valid session to save.");
             var original=TournamentRules.Event(s,request.EventId);
+            EnsureLegacy(s,request.EventId);
             var plan=System.Text.Json.JsonSerializer.Deserialize<EventPlan>(System.Text.Json.JsonSerializer.Serialize(original,JsonDefaults.Options),JsonDefaults.Options)!;
             var ready=request.Sessions.Where((_,i)=>!dirty.Contains(i)).ToList();
             var targets=request.SessionIndex is int target?new List<PlayingSession>{request.Sessions[target]}:ready;

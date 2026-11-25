@@ -8,7 +8,7 @@ The dashboard is the organiser's venue control screen for one selected event. It
 
 ## Test on this computer
 
-1. Open http://localhost:5180. Dashboard is the landing page. Select an event; there is no All Events choice. The browser remembers the last valid selection; a sole event is selected automatically. With multiple events and no remembered choice, no court/queue/program operations are shown until selection. Empty courts are normal before matches are called.
+1. Open http://localhost:5180. Dashboard is the landing page. Select an event; there is no All Events choice. Choose an event on every visit, including when only one qualifies. The picker lists events spanning today's venue date, including the first and last days. With no eligible event it shows “No event is scheduled for today.” Change event returns to the picker. An already-open detail screen stays available across midnight for finishing play. Empty courts are normal before matches are called.
 
 2. Use an existing SQL-backed event or import your own completed Excel template. No dashboard demo event is generated or offered.
 
@@ -126,9 +126,9 @@ Changing the selection is read-only: it does not revoke a tablet token, release/
 
 | --- | --- |
 
-| No event | Event picker/instructions; no court/queue/program operations |
+| No event today | Show “No event is scheduled for today.” |
 
-| Upcoming | Preparation message; configure event/presets, prepare fixtures and assignments; START remains date/session guarded |
+| Upcoming | First appears in the dashboard picker on its venue-local start date. Use Events and Fixtures for advance preparation. |
 
 | Before session | Next session's venue-local date/time; assignments can be prepared |
 
@@ -178,7 +178,7 @@ Backend: LiveDashboard.cs and LiveRuntime.cs. Frontend: LiveDashboard.tsx, live-
 
 
 
-Both builds passed (backend zero warnings/errors). Verification passed 139 event-dashboard checks, 162 existing live-lifecycle checks and 196 existing event-workflow checks (497 backend checks), plus 13 React screen/component tests. New coverage includes before/between/after sessions, second-day missing fixtures/next-round readiness, shared-court masking, cross-event override rejection, selection without mutation/token revocation, expired unfinished/completed events, new-start rejection after expiry and continuation/submission/confirmation of an existing match after expiry. Calendar rollover is simulated only in disposable TLS_Test SQL; TRS past-event import restrictions are unchanged. Screen coverage checks required selection, automatic sole-event selection, remembered selection, no All Events option and separated queues. Browser visual checks use the existing event without changing scores/assignments. Physical multi-device venue UAT remains separate.
+Both builds passed (backend zero warnings/errors). Verification passed 139 event-dashboard checks, 162 existing live-lifecycle checks and 196 existing event-workflow checks (497 backend checks), plus 13 React screen/component tests. New coverage includes before/between/after sessions, second-day missing fixtures/next-round readiness, shared-court masking, cross-event override rejection, selection without mutation/token revocation, expired unfinished/completed events, new-start rejection after expiry and continuation/submission/confirmation of an existing match after expiry. Calendar rollover is simulated only in disposable TLS_Test SQL; TRS past-event import restrictions are unchanged. Screen coverage checks required selection, explicit sole-event selection, date filtering and fresh selection on re-entry, no All Events option and separated queues. Browser visual checks use the existing event without changing scores/assignments. Physical multi-device venue UAT remains separate.
 
 
 
@@ -380,3 +380,7 @@ A called match awaiting start does not replace the finished card until it is pla
 Every two-second poll replaces the card list. A corrected result is reflected, a reset/deletion removes the affected result, and venue midnight removes prior-day completed cards. If an older valid result on that same court still exists today, it can become the latest remaining result. A network failure retains the last snapshot with the existing outdated-score warning; the next successful poll clears stale cards. No completed-result cache, additional audit/history records, table/column changes or scoring mutations are introduced.
 
 `GET /api/display` keeps its existing fields and adds only nullable `winner` (`A`/`B`) to each match. Its matches list now includes eligible confirmed results. Deploy the matching frontend and backend together so confirmed results receive the Finished presentation. Rollback restores the previous endpoint/frontend assets; existing result data requires no conversion or deletion. Frontend regressions cover finished/walkover presentation, active replacement, reset removal, pagination and offline recovery; backend checks cover court priority, official winners, event/day scope, venue-midnight expiry and reset cleanup. The disposable live HTTP lifecycle test also checks confirmed results, waiting/active replacement, correction/restart persistence and whole-schedule clearing.
+
+## Game phase
+
+Cards and tables show the tablet's warm-up, game, interval or pause state beside the score. A technical or medical pause retains the court assignment. A retirement submitted by the umpire remains on court until the organiser confirms.

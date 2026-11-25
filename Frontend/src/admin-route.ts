@@ -1,4 +1,4 @@
-import {useEffect,useState} from 'react';
+import {useEffect,useState,useRef} from 'react';
 import type {FixtureStep} from './fixture-progress';
 
 const paths={dashboard:'/dashboard',events:'/events',participants:'/participants',fixtures:'/fixtures',sba:'/sba-rankings',presets:'/game-presets',settings:'/settings'} as const;
@@ -35,17 +35,23 @@ export function adminUrl(route:AdminRoute){
   return path+(query.size?'?'+query.toString():'');
 }
 
-export function useAdminRoute(){
+export function useAdminRoute(canLeave?:()=>boolean){
   const [route,setRoute]=useState(()=>readAdminRoute());
+  const guard=useRef(canLeave),index=useRef<number>(history.state?.tlsRouteIndex??0),restoring=useRef(false);guard.current=canLeave;
   useEffect(()=>{
-    if(location.pathname==='/')history.replaceState(null,'',adminUrl({page:'dashboard'}));
-    const restore=()=>setRoute(readAdminRoute());window.addEventListener('popstate',restore);
-    return()=>window.removeEventListener('popstate',restore);
+    history.replaceState({...history.state,tlsRouteIndex:index.current},'',location.pathname==='/'?adminUrl({page:'dashboard'}):location.href);
+    const restore=(event:PopStateEvent)=>{
+      if(restoring.current){restoring.current=false;return;}
+      const next=event.state?.tlsRouteIndex;
+      if(guard.current&&!guard.current()){restoring.current=true;history.go(typeof next==='number'&&next!==index.current?index.current-next:1);return;}
+      index.current=typeof next==='number'?next:index.current-1;setRoute(readAdminRoute());
+    };
+    window.addEventListener('popstate',restore);return()=>window.removeEventListener('popstate',restore);
   },[]);
   function go(next:AdminRoute,replace=false){
-    const url=adminUrl(next);
-    if(url===location.pathname+location.search)return;
-    if(replace)history.replaceState(null,'',url);else history.pushState(null,'',url);
+    const url=adminUrl(next);if(url===location.pathname+location.search)return;
+    if(!replace)index.current++;
+    if(replace)history.replaceState({...history.state,tlsRouteIndex:index.current},'',url);else history.pushState({tlsRouteIndex:index.current},'',url);
     setRoute(readAdminRoute());
   }
   return {route,go};

@@ -7,11 +7,11 @@ type Failure={eventId:string;kind:string;message:string;at:string};
 export type PublishingSettings={revision:number;source:string;enabled:boolean;liveUrl:string;resultsUrl:string;intervalSeconds:number;hasCredential:boolean;apiKey:string;failures:Failure[]};
 
 export default function TrsPublishing({settings,onChange,credential,onCredential,editing,busy}:{settings:PublishingSettings;onChange:(settings:PublishingSettings)=>void;credential:string;onCredential:(value:string)=>void;editing:boolean;busy:boolean}){
- if(settings.source!=='TRS')return null;
+ if(!['TRS','EXCEL'].includes(settings.source))return null;
  return <EventPanel title="Score Publishing"><label className="flex items-center gap-3 mb-5"><Switch aria-label="Enable Score Publishing" checked={settings.enabled} disabled={!editing||busy} onCheckedChange={enabled=>onChange({...settings,enabled})}/>Enable Score Publishing</label>
  {settings.enabled&&<><fieldset disabled={!editing||busy} className="space-y-4">
  <label className="form-label">Live-score API URL<input className="field-input" type="url" required value={settings.liveUrl} onChange={e=>onChange({...settings,liveUrl:e.target.value})} placeholder="https://example.com/api/integration/live-scores"/></label>
- <label className="form-label">Result API URL<input className="field-input" required value={settings.resultsUrl} onChange={e=>onChange({...settings,resultsUrl:e.target.value})} placeholder="https://example.com/api/integration/results"/></label>
+ <label className="form-label">Result API URL<input className="field-input" required value={settings.resultsUrl} onChange={e=>onChange({...settings,resultsUrl:e.target.value})} placeholder="https://example.com/api/integration/event-results"/></label>
  <label className="form-label">API credential<input className="field-input" type="text" autoComplete="off" spellCheck={false} minLength={32} maxLength={512} required={!settings.hasCredential} value={credential} onChange={e=>onCredential(e.target.value)}/></label>
  <label className="form-label">Live update interval (seconds)<input className="field-input" style={{maxWidth:160}} type="number" required min={2} max={120} value={settings.intervalSeconds} onChange={e=>onChange({...settings,intervalSeconds:Number(e.target.value)})}/></label>
  </fieldset></>}

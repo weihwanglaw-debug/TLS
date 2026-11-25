@@ -1,3 +1,35 @@
+# Event score publishing
+
+TRS transfers and Excel imports can publish scores. For Excel, use the numeric
+TRS event ID in the workbook Event sheet. Workbook program references may be
+alphanumeric. Set the compatible target URL and credential in Event Settings >
+Score Publishing. TLS sends the credential in the X-TLS-Key request header.
+
+- Live: PUT /api/integration/live-scores. The event snapshot contains active matches
+  with court and current score. An empty update clears live matches.
+- Results: PUT /api/integration/event-results. The full event result snapshot contains
+  every program in programs, including programs with no confirmed results. Each
+  result carries program ID, phase, round, date when known, and confirmed scores.
+  Numeric source program IDs can link to TRS IDs. Alphanumeric workbook references
+  are preserved alongside display IDs and marked ineligible for TRS links.
+
+Both feeds include UTC generatedAt and an increasing version. Versions are persisted
+per event and stream. Result retries reuse the failed payload and its stamp as long
+as the source and destination remain the same. A newer correction replaces queued
+work. Options > Resend Results rebuilds and publishes the whole event, including
+empty results after a clear. It sends no live update. Restart republishes current
+data with a newer version.
+
+Deploy the compatible receiver before using event-wide publishing. A results URL
+containing {programId} keeps the previous per-program contract for compatible
+legacy targets. Use that form only when the imported programs carry numeric IDs.
+There is no TLS database migration for this change.
+
+## Historical contract
+
+The notes below describe earlier releases. The event publishing contract above
+takes precedence for the current release.
+
 # Publishing live scores and official results to TRS
 
 TRS and TLS use event-level live snapshots and program-level confirmed-result snapshots. Original TRS event/program IDs identify the destination; local TLS match and entry references remain descriptive snapshot content. TRS prioritizes its own recorded results when both sources exist, otherwise it displays the TLS snapshot. No TRS fixtures are created by publication.
@@ -54,3 +86,7 @@ Manual result resend uses the same confirmed-result snapshot builder as automati
 ## Manual result action - 6 November 2026
 
 Fixture and Result exposes **Options > Submit Result** for the selected program. There is no separate resend button. The action requires configured publishing. If the program has no completed or walkover results, selecting it displays **No result to submit.** and makes no publishing request; automatic BYEs alone do not count. Successful manual submission displays **Result submitted.** Automatic reset synchronization continues sending empty snapshots independently of this manual check.
+
+## Live game phase
+
+The live feed adds optional gamePhase, phaseUntil and gameNumber fields. Warm-up is sent as SC with phase WU. Other live phases use the existing IP or RC match status. The publisher sends phase transitions on its background cycle even if scores did not change. Update the TRS receiver before enabling a TLS build that publishes warm-up.

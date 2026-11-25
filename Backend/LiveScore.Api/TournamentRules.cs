@@ -47,11 +47,11 @@ public static class TournamentRules
         for(var i=0;i<ordered.Count;i++)
         {
             var s=ordered[i];
-            Need((s.Courts is null)==(s.MatchIds is null),"Each session needs both courts and program selections.");
+            Need((s.Courts is null)==(s.MatchIds is null)||plan.SchedulePlanner is not null&&s.Courts is not null&&s.MatchIds is null,"Each session needs both courts and program selections.");
             if(s.Courts is not null)
             {
                 Need(s.Courts.Length>0&&s.Courts.Distinct().Count()==s.Courts.Length&&s.Courts.All(c=>courts.Contains(c)),"Select valid, distinct courts for each session.");
-                Need(s.MatchIds!.Length<=10000&&s.MatchIds.Distinct().Count()==s.MatchIds.Length&&s.MatchIds.All(id=>!string.IsNullOrWhiteSpace(id)),"Select valid, distinct matches for each session.");
+                if(s.MatchIds is {} ids)Need(ids.Length<=10000&&ids.Distinct().Count()==ids.Length&&ids.All(id=>!string.IsNullOrWhiteSpace(id)),"Select valid, distinct matches for each session.");
             }
             if(s.ProgramLimits is not null)Need(s.ProgramLimits.All(x=>x.Value>=0&&x.Value<=10000&&data.Programs.Any(p=>p.Id==x.Key&&p.EventId==plan.EventId)),"Choose valid session program quantities.");
             Need(s.Date>=ev!.StartDate&&s.Date<=ev.EndDate&&s.Start<s.End,"Sessions must be inside the event dates and end after they start.");

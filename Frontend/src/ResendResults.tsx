@@ -12,13 +12,12 @@ export default function ResendResults({view,programId,children}:{view:View;progr
  async function resend(){
   if(!ready||sending.current)return;
   setAttempt(value=>value+1);setError('');setMessage('');
-  if(!view.plans.find(p=>p.programId===programId)?.matches.some(m=>['C','WO'].includes(m.status))){setError('No result to submit.');return;}
   sending.current=true;setBusy(true);
   try{
    const result=await api<{failures:{message:string}[]}>('trs/publishing/'+encodeURIComponent(view.eventInfo.id)+'/resend?programId='+encodeURIComponent(programId),'POST');
    if(result.failures.length)setError(result.failures.map(f=>f.message).join('\n'));
-   else setMessage('Result submitted.');
+   else setMessage('Results sent.');
   }catch(e){setError((e as Error).message);}finally{sending.current=false;setBusy(false);}
  }
- return <><ActionMessage key={attempt+':error'} message={error}/><ActionMessage key={attempt+':success'} message={message} variant="success"/>{children({label:busy?'Submitting...':'Submit Result',disabled:!ready||busy,onClick:()=>void resend()})}</>;
+ return <><ActionMessage key={attempt+':error'} message={error}/><ActionMessage key={attempt+':success'} message={message} variant="success"/>{children({label:busy?'Sending...':'Resend Results',disabled:!ready||busy,onClick:()=>void resend()})}</>;
 }

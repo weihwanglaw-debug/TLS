@@ -3,7 +3,24 @@ export type LiveRules=import('./tournament-types').Rules;
 export type ServingState={serverSide:'A'|'B';rightA:string;rightB:string;leftSide:'A'|'B';decidingEndsChanged:boolean};
 export type ServingSetup={serverSide:'A'|'B';serverId:string;receiverId:string;leftSide:'A'|'B'};
 export type RallyRecord={game:number;beforeA:number;beforeB:number;a:number;b:number;winnerSide:string;serverId:string;receiverId:string;leftSide:string;at:string};
-export type LiveMatch={earlyStartMinutes?:number;serving:ServingState|null;serverId:string;receiverId:string;intervalUntil:string|null;rallies:RallyRecord[];resumptions?:{game:number;a:number;b:number;rallyIndex:number;at:string}[];timeZone?:string;rallyHistoryComplete:boolean;reviewAvailable:boolean;presetId:string|null;rulesAssigned:boolean;resultDetails:ResultDetails;players:{id:string;name:string;side:string}[];id:string;eventId:string;eventName:string;programId:string;programName:string;number:number;roundLabel:string;status:string;entryA:string;entryB:string|null;nameA:string;nameB:string;court:number|null;plannedStart:string|null;plannedEnd:string|null;durationMinutes:number;umpireId:string|null;serviceJudgeId?:string|null;lineJudgeIds?:string[];umpireName:string;scoreA:number;scoreB:number;games:{a:number;b:number}[];gamesWonA:number;gamesWonB:number;rules:LiveRules;version:number;startedAt:string|null;finishedAt:string|null;awaitingNextGame:boolean;matchWon:boolean;canUndo:boolean;canUndoPoint?:boolean;paperMode:boolean;deviceName:string;deviceIp:string};
+export type LivePhase = { gamePhase?: string | null; phaseUntil?: string | null; gameNumber?: number | null; resultKind?: string };
+export function phaseText(match: LivePhase, now: number) {
+ const seconds=Math.max(0,Math.ceil((Date.parse(match.phaseUntil||'')-now)/1000))||0;
+ const timer=seconds>0?' · '+Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0'):'';
+ switch(match.gamePhase) {
+  case 'WU': return 'Warm-up'+timer;
+  case 'IP': return 'Game '+(match.gameNumber||1)+' in progress';
+  case 'IN': return timer?'Interval'+timer:'Interval · Awaiting resume';
+  case 'BG': return timer?'Between games'+timer:'Awaiting Game '+(match.gameNumber||2);
+  case 'TP': return 'Technical pause';
+  case 'MP': return 'Medical pause';
+  case 'PP': return 'Playing on paper';
+  case 'RS': return 'Awaiting umpire submission';
+  case 'RC': return match.resultKind==='R'?'Retirement · Awaiting confirmation':'Awaiting result confirmation';
+  default: return '';
+ }
+}
+export type LiveMatch=LivePhase&{winnerSide?:'A'|'B'|null;earlyStartMinutes?:number;serving:ServingState|null;serverId:string;receiverId:string;intervalUntil:string|null;rallies:RallyRecord[];resumptions?:{game:number;a:number;b:number;rallyIndex:number;at:string}[];timeZone?:string;rallyHistoryComplete:boolean;reviewAvailable:boolean;presetId:string|null;rulesAssigned:boolean;resultDetails:ResultDetails;players:{id:string;name:string;side:string}[];id:string;eventId:string;eventName:string;programId:string;programName:string;number:number;roundLabel:string;status:string;entryA:string;entryB:string|null;nameA:string;nameB:string;court:number|null;plannedStart:string|null;plannedEnd:string|null;durationMinutes:number;umpireId:string|null;serviceJudgeId?:string|null;lineJudgeIds?:string[];umpireName:string;scoreA:number;scoreB:number;games:{a:number;b:number}[];gamesWonA:number;gamesWonB:number;rules:LiveRules;version:number;startedAt:string|null;finishedAt:string|null;awaitingNextGame:boolean;matchWon:boolean;canUndo:boolean;canUndoPoint?:boolean;paperMode:boolean;deviceName:string;deviceIp:string};
 export type QueueItem={scheduleWarnings?:string[]|null;match:LiveMatch;estimatedStart:string|null;delayed:boolean;delayMinutes:number;waitingFor:string;eligibleCourts:number[]};
 export type LiveCourt={outsideEvent:boolean;otherEventName:string|null;number:number;status:string;match:LiveMatch|null;lastMatch:LiveMatch|null;next:QueueItem|null;device:{state:string;name:string;ipAddress:string;lastSeen:string|null;codeExpired:boolean;pairingPending?:boolean;pairingExpiresAt?:string|null}};
 export type DashboardEventContext={calendar:'U'|'O'|'C';sessionState:'N'|'I'|'D'|'B'|'G'|'F';day:number;nextSession:string|null;sessionEnd:string|null;completed:boolean;unfinished:number;awaitingConfirmation:number;paperMatches:number;missingFixtures:number;missingCourts:boolean;allCourtsClosed:boolean;missingSessions:boolean;missingOfficials:boolean;missingPresets:boolean;noPrograms:boolean};

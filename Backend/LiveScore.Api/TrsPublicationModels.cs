@@ -13,8 +13,10 @@ public sealed record PublicationFailure(string EventId, string Kind, string Mess
 public sealed record SpectatorEntry(string Id, string Name, string[] Players, int? Seed);
 public sealed record SpectatorMatch(string Id, int ProgramId, string ProgramName, string Phase, int Round, string RoundLabel,
     string Group, SpectatorEntry Team1, SpectatorEntry Team2, List<GameScore> Games, string? Winner, string Outcome, string Remark,
-    string MatchDate, string StartTime, string EndTime, string Court, string Status, int? ScoreA, int? ScoreB, string? ServerSide);
+    string MatchDate, string StartTime, string EndTime, string Court, string Status, int? ScoreA, int? ScoreB, string? ServerSide,
+    string? GamePhase=null, DateTimeOffset? PhaseUntil=null, int? GameNumber=null);
+public sealed record PublishedProgram(int Id, string Name, string Reference, bool CanLink);
 public sealed record TrsScoreSnapshot(int SchemaVersion, int EventId, string EventName, int? ProgramId, string ProgramName,
-    long Version, DateTimeOffset GeneratedAt, string TimeZone, int RefreshSeconds, SpectatorMatch[] Matches);
+    long Version, DateTimeOffset GeneratedAt, string TimeZone, int RefreshSeconds, SpectatorMatch[] Matches, PublishedProgram[]? Programs = null);
 
 public sealed record EventSettingsRequest(long Revision, DateOnly StartDate, DateOnly EndDate, EventPlan Plan, TrsPublicationRequest? Publishing);

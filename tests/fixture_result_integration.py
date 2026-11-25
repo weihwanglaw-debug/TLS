@@ -11,10 +11,10 @@ def call(path,body=None,status=200,method=None,headers=None):
  global checks
  request=urllib.request.Request(base+path,data=body if isinstance(body,bytes) else json.dumps(body).encode() if body is not None else None,method=method or ('POST' if body is not None else 'GET'),headers=headers or {'Content-Type':'application/json'})
  try:
-  with urllib.request.urlopen(request,timeout=30) as response:code=response.status;raw=response.read()
+  with urllib.request.urlopen(request,timeout=2 if path.startswith('setup') else 30) as response:code=response.status;raw=response.read()
  except urllib.error.HTTPError as error:code=error.code;raw=error.read()
  assert code==status,(path,code,status,raw[:1800]);checks+=1;return json.loads(raw)
-with socket.socket() as probe:assert probe.connect_ex(('127.0.0.1',5199))!=0
+with socket.socket() as probe:probe.settimeout(.5);assert probe.connect_ex(('127.0.0.1',5199))!=0
 db=TestDatabase()
 try:
  with tempfile.TemporaryDirectory(prefix='tls-fixture-result-') as folder:
@@ -22,7 +22,7 @@ try:
   events.write_text('[]');log=open(folder/'server.log','w')
   def start():
    global process
-   process=subprocess.Popen(['dotnet',str(dll)],cwd=project,env={**db.env,'ASPNETCORE_URLS':'http://localhost:5199','Trs__EventFile':str(events)},stdout=log,stderr=log)
+   process=subprocess.Popen(['dotnet',str(dll)],cwd=project,env={**db.env,'ASPNETCORE_URLS':'http://localhost:5199','Trs__ApiBaseUrl':'','Trs__EventFile':str(events)},stdout=log,stderr=log)
    for _ in range(100):
     try:return call('setup/')['data']
     except urllib.error.URLError:time.sleep(.1)
@@ -59,7 +59,7 @@ try:
     draw=mutate('preview-swap',{'token':draw['token'],'entryA':original,'entryB':other},method='POST');assert draw['matches'][0]['entryA']==other
     mutate('confirm',{'token':draw['token']},method='POST');assert len(view()['plans'][0]['matches'])==expected
     if format=='KO':
-     latest=view()['plans'][0];mutate('reset-schedule',{'eventId':eventId,'roundKeys':[pid+':K:'+str(latest['lastRound'])]},method='POST');mutate('reset-latest-round',{'programId':pid},method='POST');assert view()['plans'][0]['phase']=='P' and not view()['plans'][0]['matches'];assert next(i for i in call('setup/')['data']['imports'] if i['eventId']==eventId)['stage']=='P'
+     latest=view()['plans'][0];mutate('reset-schedule',{'eventId':eventId,'fromDate':day},method='POST');mutate('reset-latest-round',{'programId':pid},method='POST');assert view()['plans'][0]['phase']=='P' and not view()['plans'][0]['matches'];assert next(i for i in call('setup/')['data']['imports'] if i['eventId']==eventId)['stage']=='P'
      draw=generate();mutate('confirm',{'token':draw['token']},method='POST')
     match=next(m for m in view()['plans'][0]['matches'] if m['status']=='SC');entry=next(e for e in saved['entries'] if e['id']==match['entryA']);player=entry['participantIds'][0]
     details={'shuttlesUsed':5,'remark':'Paper summary','cards':[{'participantId':player,'type':'Y','game':1,'remark':''}],'challenges':[{'side':'A','game':1,'outcome':'U'}]}
@@ -78,7 +78,7 @@ try:
      mutate('result',{'matchId':m['id'],'matchVersion':m['matchVersion'],'games':[{'a':5,'b':0}]})
     if format=='RR':assert view()['plans'][0]['phase']=='C';mutate('preview',generation,400,'POST')
     else:
-     draw=generate();mutate('confirm',{'token':draw['token']},method='POST');latest=view()['plans'][0];mutate('reset-schedule',{'eventId':eventId,'roundKeys':[pid+':K:'+str(latest['lastRound'])]},method='POST');mutate('reset-latest-round',{'programId':pid},method='POST')
+     generation['earliestStart']=end+'T10:00:00';draw=generate();mutate('confirm',{'token':draw['token']},method='POST');latest=view()['plans'][0];mutate('reset-schedule',{'eventId':eventId,'fromDate':end},method='POST');mutate('reset-latest-round',{'programId':pid},method='POST')
     before=view();stop();start();assert view()==before
    print(f'PASS: {checks} fixture/result HTTP assertions; formats, preview swaps, reset, corrections, duration, details, ranking snapshots and SQL restart persistence.')
   except Exception:

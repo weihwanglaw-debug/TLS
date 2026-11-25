@@ -39,6 +39,8 @@ try {
  elseif($env:TLS_TEST_MODE -eq 'legacy-preset-id'){$cmd.CommandText="UPDATE SystemSettings SET LiveVenueJson=JSON_MODIFY(LiveVenueJson, '$.presets[0].id', 'legacy-preset-guid') WHERE Id=1";[void]$cmd.ExecuteNonQuery()}
  elseif($env:TLS_TEST_MODE -eq 'audit'){$cmd.CommandText='SELECT COUNT(*) FROM AuditLogs';Write-Output $cmd.ExecuteScalar()}
  elseif($env:TLS_TEST_MODE -eq 'program-json'){$cmd.CommandText='SELECT ProgramId,Json FROM ProgramOperations ORDER BY ProgramId FOR JSON PATH';Write-Output $cmd.ExecuteScalar()}
+ elseif($env:TLS_TEST_MODE -eq 'event-json'){$cmd.CommandText='SELECT (SELECT EventId,Json FROM EventOperations ORDER BY EventId FOR JSON PATH)';Write-Output $cmd.ExecuteScalar()}
+ elseif($env:TLS_TEST_MODE -eq 'old-schedule-metadata'){$cmd.CommandText="UPDATE EventOperations SET Json=JSON_MODIFY(JSON_MODIFY(Json, '$.planningDraft', JSON_QUERY('{`"sessions`":[]}')), '$.schedulePlanner.draft', JSON_QUERY('{`"sessions`":[]}'))";[void]$cmd.ExecuteNonQuery()}
  elseif($env:TLS_TEST_MODE -eq 'tables'){$cmd.CommandText='SELECT COUNT(*) FROM sys.tables';Write-Output $cmd.ExecuteScalar()}
 } finally {$cn.Dispose()}
 '''

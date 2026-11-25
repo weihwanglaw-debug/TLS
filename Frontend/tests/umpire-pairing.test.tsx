@@ -50,13 +50,20 @@ test('a new pairing hash is handled without reloading the open scoreboard',async
 test('early starts require a confirmation and retain setup selections',async()=>{
  const view={sessionId:'session-test',serverTime:new Date().toISOString(),heartbeatSeconds:30,match:{id:'m',earlyStartMinutes:30,umpireName:'Jane',eventName:'Event',court:1,number:1,status:'SC',version:1,rules:{gamesToWin:2,pointsToWin:21,countShuttles:true},games:[],players:[{id:'a',name:'Alice',side:'A'},{id:'b',name:'Bob',side:'B'}],serving:null,scoreA:0,scoreB:0}};
  localStorage.setItem('tls-umpire-match',JSON.stringify({token:'token',view}));
- service.liveApi.mockImplementation(async(path:string)=>path==='tablet/state'?view:path==='tablet/command'?{...view,match:{...view.match,status:'IP'}}:{});
+ service.liveApi.mockImplementation(async(path:string,body?:{action:string})=>{
+  if(path==='tablet/state')return view;
+  if(path!=='tablet/command')return {};
+  const serverTime=new Date();
+  const warming=body?.action==='WARMUP';
+  return {...view,serverTime:serverTime.toISOString(),match:{...view.match,status:warming?'SC':'IP',
+   version:warming?2:3,gamePhase:warming?'WU':'IP',phaseUntil:warming?new Date(serverTime.getTime()+120000).toISOString():null}};
+ });
  window.history.replaceState(null,'','/umpire/session-test');render(<UmpireApp/>);const start=screen.getByRole('button',{name:'Start Warm-up'});
  await waitFor(()=>expect((start as HTMLButtonElement).disabled).toBe(false));
  expect(screen.getByText('Umpire: Jane')).toBeTruthy();expect(screen.queryByText('Challenges left')).toBeNull();expect(screen.getByRole('button',{name:'+ Shuttle'})).toBeTruthy();
- fireEvent.click(start);fireEvent.click(screen.getByRole('button',{name:/Start Game ·/}));fireEvent.click(screen.getByRole('button',{name:'Confirm & Start Match'}));
+ fireEvent.click(start);fireEvent.click(await screen.findByRole('button',{name:/Start Game ·/}));fireEvent.click(screen.getByRole('button',{name:'Confirm & Start Match'}));
  expect(await screen.findByText(/30 minutes before its scheduled time/)).toBeTruthy();
- expect(service.liveApi.mock.calls.filter(c=>c[0]==='tablet/command')).toHaveLength(0);
+ expect(service.liveApi.mock.calls.filter(c=>c[0]==='tablet/command').map(c=>c[1].action)).toEqual(['WARMUP']);
  fireEvent.click(screen.getByRole('button',{name:'Go back'}));
  fireEvent.click(screen.getByRole('button',{name:'Confirm & Start Match'}));fireEvent.click(screen.getByRole('button',{name:'Start match',exact:true}));
  await waitFor(()=>expect(service.liveApi).toHaveBeenCalledWith('tablet/command',expect.objectContaining({action:'START',confirmEarlyStart:true,serving:{serverSide:'A',serverId:'a',receiverId:'b',leftSide:'A'}}),'token',8000));

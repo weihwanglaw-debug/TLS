@@ -14,13 +14,15 @@ function session(warmupSeconds:number|undefined=120,intervalSeconds?:number){
  let match={id:'timer-match',status:intervalSeconds===undefined?'SC':'IP',version:1,court:1,number:1,umpireName:'Jane',eventName:'Event',programName:'Singles',earlyStartMinutes:0,
   rules:{...newRules(),warmupSeconds},games:intervalSeconds===undefined?[]:[{a:21,b:10}],players:[{id:'a',name:'Alice',side:'A'},{id:'b',name:'Bob',side:'B'}],
   scoreA:intervalSeconds===undefined?0:21,scoreB:intervalSeconds===undefined?0:10,awaitingNextGame:intervalSeconds!==undefined,matchWon:false,canUndoPoint:true,
-  serving:intervalSeconds===undefined?null:{serverSide:'A',leftSide:'A',rightA:'a',rightB:'b',decidingEndsChanged:false},intervalUntil:intervalSeconds===undefined?null:new Date(Date.now()+intervalSeconds*1000).toISOString(),startedAt:null as string|null};
+  serving:intervalSeconds===undefined?null:{serverSide:'A',leftSide:'A',rightA:'a',rightB:'b',decidingEndsChanged:false},intervalUntil:intervalSeconds===undefined?null:new Date(Date.now()+intervalSeconds*1000).toISOString(),gamePhase:null as string|null,phaseUntil:null as string|null,startedAt:null as string|null};
  const view=()=>({sessionId:'timer-session',serverTime:new Date().toISOString(),heartbeatSeconds:30,match});
  localStorage.setItem('tls-umpire-match',JSON.stringify({token:'token',view:view()}));
  window.history.replaceState(null,'','/umpire/timer-session');
  service.liveApi.mockImplementation(async(path:string,body:any)=>{
   if(path==='tablet/command'){
-   if(body.action==='START')match={...match,status:'IP',startedAt:new Date().toISOString(),serving:{serverSide:'A',leftSide:'A',rightA:'a',rightB:'b',decidingEndsChanged:false},version:match.version+1};
+   if(body.action==='WARMUP')match={...match,gamePhase:'WU',phaseUntil:new Date(Date.now()+(warmupSeconds??120)*1000).toISOString(),version:match.version+1};
+   if(body.action==='RESUME_INTERVAL')match={...match,gamePhase:'IP',intervalUntil:null,phaseUntil:null,version:match.version+1};
+   if(body.action==='START')match={...match,status:'IP',gamePhase:'IP',phaseUntil:null,startedAt:new Date().toISOString(),serving:{serverSide:'A',leftSide:'A',rightA:'a',rightB:'b',decidingEndsChanged:false},version:match.version+1};
    if(body.action==='NEXT')match={...match,awaitingNextGame:false,scoreA:0,scoreB:0,intervalUntil:null,version:match.version+1};
   }
   return path==='tablet/state'||path==='tablet/command'?view():{};
@@ -31,27 +33,27 @@ async function open(){render(<UmpireApp/>);await act(async()=>{});}
 async function advance(seconds:number){await act(async()=>{await vi.advanceTimersByTimeAsync(seconds*1000);});}
 const commands=()=>service.liveApi.mock.calls.filter(c=>c[0]==='tablet/command');
 
-test('warm-up counts down locally and the same enabled button can start the match early',async()=>{
+test('server-confirmed warm-up counts down on the tablet and the same enabled button can start the match early',async()=>{
  session();await open();
- fireEvent.click(screen.getByRole('button',{name:'Start Warm-up'}));
+ fireEvent.click(screen.getByRole('button',{name:'Start Warm-up'}));await act(async()=>{});
  expect((screen.getByRole('button',{name:'Start Game · 2:00'}) as HTMLButtonElement).disabled).toBe(false);
- expect(commands()).toHaveLength(0);
+ expect(commands()).toHaveLength(1);
  await advance(15);
  fireEvent.click(screen.getByRole('button',{name:'Start Game · 1:45'}));
  expect(screen.getByRole('dialog',{name:'Set Up Match'})).toBeTruthy();
  fireEvent.click(screen.getByRole('button',{name:'Confirm & Start Match'}));await act(async()=>{});
- expect(commands()).toHaveLength(1);expect(commands()[0][1]).toEqual(expect.objectContaining({action:'START',serving:{serverSide:'A',serverId:'a',receiverId:'b',leftSide:'A'}}));
+ expect(commands()).toHaveLength(2);expect(commands()[1][1]).toEqual(expect.objectContaining({action:'START',serving:{serverSide:'A',serverId:'a',receiverId:'b',leftSide:'A'}}));
  expect(screen.getByRole('button',{name:'Add point to side A'})).toBeTruthy();
  expect(JSON.parse(localStorage.getItem('tls-umpire-match')!).view.match.startedAt).toBe(new Date().toISOString());
 });
 
 test('warm-up warns at thirty seconds and expiry waits for an explicit start',async()=>{
- session();await open();fireEvent.click(screen.getByRole('button',{name:'Start Warm-up'}));
+ session();await open();fireEvent.click(screen.getByRole('button',{name:'Start Warm-up'}));await act(async()=>{});
  await advance(89);expect(screen.queryByText('Ready to play')).toBeNull();
  await advance(1);expect(screen.getByText('Ready to play')).toBeTruthy();
  expect((screen.getByRole('button',{name:/Start Game · 0:30/}) as HTMLButtonElement).disabled).toBe(false);
  await advance(30);expect(screen.getByRole('button',{name:'Start Game',exact:true})).toBeTruthy();
- expect(screen.queryByText('Ready to play')).toBeNull();expect(commands()).toHaveLength(0);
+ expect(screen.queryByText('Ready to play')).toBeNull();expect(commands()).toHaveLength(1);
  expect(JSON.parse(localStorage.getItem('tls-umpire-match')!).view.match.status).toBe('SC');
 });
 
@@ -59,65 +61,58 @@ test.each([0,5,180])('saved warm-up duration %s controls the button',async secon
  session(seconds);await open();
  if(seconds===0){fireEvent.click(screen.getByRole('button',{name:'Start Game',exact:true}));expect(screen.getByRole('dialog',{name:'Set Up Match'})).toBeTruthy();}
  else{
-  fireEvent.click(screen.getByRole('button',{name:'Start Warm-up'}));
+  fireEvent.click(screen.getByRole('button',{name:'Start Warm-up'}));await act(async()=>{});
   expect(screen.getByRole('button',{name:new RegExp('Start Game · '+Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0'))})).toBeTruthy();
   await advance(seconds);expect(screen.getByRole('button',{name:'Start Game',exact:true})).toBeTruthy();
  }
- expect(commands()).toHaveLength(0);
+ expect(commands()).toHaveLength(seconds===0?0:1);
 });
 
-test('legacy missing warm-up uses 120 seconds and refresh clears only the local countdown',async()=>{
+test('legacy missing warm-up uses 120 seconds and refresh retains the server countdown',async()=>{
  session();const saved=JSON.parse(localStorage.getItem('tls-umpire-match')!);delete saved.view.match.rules.warmupSeconds;
  localStorage.setItem('tls-umpire-match',JSON.stringify(saved));
- await open();fireEvent.click(screen.getByRole('button',{name:'Start Warm-up'}));await advance(10);
+ await open();fireEvent.click(screen.getByRole('button',{name:'Start Warm-up'}));await act(async()=>{});await advance(10);
  expect(screen.getByRole('button',{name:'Start Game · 1:50'})).toBeTruthy();
- expect(localStorage.getItem('tls-umpire-match')).not.toContain('until');
- cleanup();await open();expect(screen.getByRole('button',{name:'Start Warm-up'})).toBeTruthy();expect(commands()).toHaveLength(0);
+ cleanup();await open();expect(screen.getByRole('button',{name:'Start Game · 1:50'})).toBeTruthy();expect(commands()).toHaveLength(1);
 });
 
 test('cancelling serving setup and using Match actions preserves the running warm-up',async()=>{
- session();await open();fireEvent.click(screen.getByRole('button',{name:'Start Warm-up'}));await advance(10);
+ session();await open();fireEvent.click(screen.getByRole('button',{name:'Start Warm-up'}));await act(async()=>{});await advance(10);
  fireEvent.click(screen.getByRole('button',{name:'Start Game · 1:50'}));fireEvent.click(screen.getByRole('button',{name:'Cancel',exact:true}));
  await advance(10);fireEvent.click(screen.getByRole('button',{name:'Match actions'}));
  fireEvent.click(screen.getByRole('button',{name:'Start Game · 1:40'}));expect(screen.getByRole('dialog',{name:'Set Up Match'})).toBeTruthy();
- expect(commands()).toHaveLength(0);
+ expect(commands()).toHaveLength(1);
 });
 
-test('between-game countdown remains clickable, warns at twenty seconds and never starts automatically',async()=>{
+test('between-game countdown gates both entry points and waits for the umpire',async()=>{
  session(120,45);await open();
- expect((screen.getByRole('button',{name:'Start Next Game · 0:45'}) as HTMLButtonElement).disabled).toBe(false);
+ expect((screen.getByRole('button',{name:'0:45'}) as HTMLButtonElement).disabled).toBe(true);
  fireEvent.click(screen.getByRole('button',{name:'Match actions'}));
- expect(screen.getAllByRole('button',{name:'Start Next Game · 0:45'}).every(b=>!(b as HTMLButtonElement).disabled)).toBe(true);
- fireEvent.click(screen.getByRole('button',{name:'Close',exact:true}));await advance(25);
- expect(screen.getByText('Prepare to play')).toBeTruthy();expect((screen.getByRole('button',{name:/Start Next Game · 0:20/}) as HTMLButtonElement).disabled).toBe(false);
- await advance(20);const next=screen.getByRole('button',{name:'Set up next game'});expect((next as HTMLButtonElement).disabled).toBe(false);
+ expect(screen.getAllByRole('button',{name:'0:45'}).every(b=>(b as HTMLButtonElement).disabled)).toBe(true);
+ fireEvent.click(screen.getByRole('button',{name:'Close',exact:true}));await advance(45);
  expect(commands()).toHaveLength(0);
- fireEvent.click(next);fireEvent.click(screen.getByRole('button',{name:'Confirm & Start Next Game'}));await act(async()=>{});
- expect(commands()).toHaveLength(1);expect(commands()[0][1].action).toBe('NEXT');
+ fireEvent.click(screen.getByRole('button',{name:'Start Next Game'}));
+ fireEvent.click(screen.getByRole('button',{name:'Confirm & Start Next Game'}));await act(async()=>{});
+ expect(commands()[0][1].action).toBe('NEXT');
 });
 
-test('a refreshed interval deadline does not block an already open next-game form',async()=>{
- const state=session(120,0);await open();fireEvent.click(screen.getByRole('button',{name:'Set up next game'}));
- state.setInterval(90);await advance(30);
- expect((screen.getByRole('button',{name:'Confirm & Start Next Game'}) as HTMLButtonElement).disabled).toBe(false);
- fireEvent.click(screen.getByRole('button',{name:'Confirm & Start Next Game'}));await act(async()=>{});
- expect(commands()).toHaveLength(1);expect(commands()[0][1].action).toBe('NEXT');
-});
-
-test.each(['scoreboard','Match actions'])('next game can start early through %s',async entry=>{
- session(120,120);await open();
- if(entry==='Match actions')fireEvent.click(screen.getByRole('button',{name:'Match actions'}));
- fireEvent.click(screen.getByRole('button',{name:/Start Next Game · 2:00/}));
- expect(commands()).toHaveLength(0);
- fireEvent.click(screen.getByRole('button',{name:'Confirm & Start Next Game'}));await act(async()=>{});
- expect(commands()).toHaveLength(1);expect(commands()[0][1]).toEqual(expect.objectContaining({action:'NEXT',serving:{serverSide:'A',serverId:'a',receiverId:'b',leftSide:'B'}}));
+test('mid-game interval remains paused at zero and through a reload',async()=>{
+ const state=session(120,30);
+ state.updateMatch({awaitingNextGame:false,games:[],scoreA:11,scoreB:8,gamePhase:'IN'});
+ await open();
+ expect((screen.getByRole('button',{name:'0:30'}) as HTMLButtonElement).disabled).toBe(true);
+ await advance(30);cleanup();await open();
+ expect(screen.queryByRole('button',{name:'Add point to side A'})).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'Resume'}));await act(async()=>{});
+ expect(commands()[0][1].action).toBe('RESUME_INTERVAL');
  expect(screen.getByRole('button',{name:'Add point to side A'})).toBeTruthy();
+ expect(screen.getByLabelText('Side A score').textContent).toBe('11');
 });
 
 test('a fresh 120-second deadline starts at 2:00 between display ticks',async()=>{
  const state=session(120,0);await open();await advance(.25);state.setInterval(120);
  fireEvent.click(screen.getByRole('button',{name:'+ Shuttle'}));await act(async()=>{});
- expect(screen.getByRole('button',{name:'Start Next Game · 2:00'})).toBeTruthy();
+ expect(screen.getByRole('button',{name:'2:00'})).toBeTruthy();
  expect(screen.queryByText(/2:01/)).toBeNull();
 });
 
@@ -127,54 +122,10 @@ test('retaining a pending command does not rewind the server clock or countdown'
  const previous=service.liveApi.getMockImplementation()!;
  service.liveApi.mockImplementation((path:string,body:any)=>path==='tablet/command'?new Promise(resolve=>{acknowledge=resolve;}):previous(path,body));
  fireEvent.click(screen.getByRole('button',{name:'+ Shuttle'}));await act(async()=>{});
- expect(screen.getByRole('button',{name:'Start Next Game · 1:50'})).toBeTruthy();
- await advance(3);expect(screen.getByRole('button',{name:'Start Next Game · 1:47'})).toBeTruthy();
+ expect(screen.getByRole('button',{name:'1:50'})).toBeTruthy();
+ await advance(3);expect(screen.getByRole('button',{name:'1:47'})).toBeTruthy();
  await act(async()=>acknowledge(state.view()));
- expect((screen.getByRole('button',{name:'Start Next Game · 1:47'}) as HTMLButtonElement).disabled).toBe(false);
-});
-
-test('browser Back and Forward discard warm-up while preserving the assigned session',async()=>{
- session();await open();fireEvent.click(screen.getByRole('button',{name:'Start Warm-up'}));await advance(10);
- window.history.replaceState(null,'','/umpire');fireEvent(window,new PopStateEvent('popstate'));
- expect(screen.getByRole('button',{name:'Connect Tablet'})).toBeTruthy();
- window.history.replaceState(null,'','/umpire/timer-session');fireEvent(window,new PopStateEvent('popstate'));await act(async()=>{});
- expect(screen.getByRole('button',{name:'Start Warm-up'})).toBeTruthy();expect(screen.queryByRole('button',{name:/Start Game ·/})).toBeNull();
- expect(JSON.parse(localStorage.getItem('tls-umpire-match')!).token).toBe('token');expect(commands()).toHaveLength(0);
-});
-
-test('an early next-game command can retry the same operation after a lost acknowledgement',async()=>{
- session(120,120);const previous=service.liveApi.getMockImplementation()!;
- let confirmed:unknown,attempts=0;
- service.liveApi.mockImplementation(async(path:string,body:any)=>{
-  if(path==='tablet/command'){
-   if(++attempts===1){confirmed=await previous(path,body);throw new Error('Acknowledgement lost');}
-   return confirmed;
-  }
-  return previous(path,body);
- });
- await open();fireEvent.click(screen.getByRole('button',{name:'Start Next Game · 2:00'}));
- fireEvent.click(screen.getByRole('button',{name:'Confirm & Start Next Game'}));await act(async()=>{});
- expect(screen.getByText('Reconnecting…')).toBeTruthy();expect(screen.queryByRole('button',{name:'Retry pending action'})).toBeNull();
- expect(screen.queryByRole('dialog',{name:'Unable to complete action'})).toBeNull();
- await advance(2);expect(screen.queryByRole('dialog')).toBeNull();
- expect(commands()).toHaveLength(2);expect(commands()[0][1]).toEqual(commands()[1][1]);expect(commands()[0][1].action).toBe('NEXT');
- expect(screen.getByRole('button',{name:'Add point to side A'})).toBeTruthy();
- expect(JSON.parse(localStorage.getItem('tls-umpire-match')!).pending).toBeUndefined();
-});
-
-test('undoing and re-entering a previous winning point never forces a second full interval',async()=>{
- const state=session(120,0);state.updateMatch({awaitingNextGame:false,scoreA:0,scoreB:0});
- const previous=service.liveApi.getMockImplementation()!;
- service.liveApi.mockImplementation(async(path:string,body:any)=>{
-  if(path==='tablet/command'&&body.action==='UNDO_POINT')state.updateMatch({games:[],scoreA:20,scoreB:10,version:2});
-  if(path==='tablet/command'&&body.action==='POINT'){state.updateMatch({games:[{a:21,b:10}],scoreA:21,scoreB:10,awaitingNextGame:true,version:3});state.setInterval(120);}
-  return previous(path,body);
- });
- await open();fireEvent.click(screen.getByRole('button',{name:'Undo point'}));await act(async()=>{});
- fireEvent.click(screen.getByRole('button',{name:'Add point to side A'}));await act(async()=>{});
- const next=screen.getByRole('button',{name:'Start Next Game · 2:00'});expect((next as HTMLButtonElement).disabled).toBe(false);
- fireEvent.click(next);fireEvent.click(screen.getByRole('button',{name:'Confirm & Start Next Game'}));await act(async()=>{});
- expect(commands().map(c=>c[1].action)).toEqual(['UNDO_POINT','POINT','NEXT']);expect(screen.getByLabelText('Side A score').textContent).toBe('0');
+ expect((screen.getByRole('button',{name:'1:47'}) as HTMLButtonElement).disabled).toBe(true);
 });
 
 test('preset form defaults warm-up to 120 and passes zero through unchanged',()=>{

@@ -1,8 +1,8 @@
 # Tournament Livescore System (TLS)
 
-Current scheduling: [Whole-tournament planner](docs/TOURNAMENT_SCHEDULE_PLANNER.md) provides per-program/round durations, future-round planning, non-overlapping dated sessions, rest-aware complete Auto Assign,15-minute starts and validated moves/swaps. This replaces the event-wide Match Timing input described in older notes. Planned times remain estimates during live play.
+Current scheduling: [Whole-tournament planner](docs/TOURNAMENT_SCHEDULE_PLANNER.md) provides per-program/round durations, future-round planning, non-overlapping dated sessions, rest-aware complete Auto Assign, configurable 5/10/15-minute starts and validated moves/swaps. Complete the opening draws, prepare the whole event timetable locally and save once; there is no saved-draft workflow. This replaces the event-wide Match Timing input described in older notes. Planned times remain estimates during live play.
 
-TLS runs its organiser console and umpire scoring against the local TLS SQL Server database through EF Core. Imported preparation is read-only except TLS event dates, which can be edited after saved schedules are reset, provided no started/result history exists. Only one event is allowed on each calendar day; imports and date edits reject overlapping inclusive ranges. Its Fixture and Result module reuses TRS components and supports Knockout, Round Robin and Group + Knockout, with local scheduling, manual results and tablet result review.
+TLS runs its organiser console and umpire scoring against the local TLS SQL Server database through EF Core. Imported preparation is read-only except TLS event dates, which can be edited when the proposed range includes all sessions, bookings and recorded play. Only one event is allowed on each calendar day; imports and date edits reject overlapping inclusive ranges. Its Fixture and Result module reuses TRS components and supports Knockout, Round Robin and Group + Knockout, with local scheduling, manual results and tablet result review.
 
 ## Run locally
 
@@ -29,8 +29,8 @@ The standalone sidebar module copies the TRS ranking page and stores rankings/cl
 
 1. Open Event and use an existing SQL-backed event, or download the blank Excel template and import your own information.
 2. Use the event's program menu to open filtered Participant or Fixture and Result details.
-3. In Event Details, save officials, and edit dates before scheduling if needed. Master Setting defines venue courts; choose each session's courts in Fixture → Schedule. Set estimated match duration per round in Schedule. Create scoring rules in Game Setting Preset.
-4. In Fixture and Result, use Continue through the persistent Seeding → Draw → Schedule → Fixture & Results steps. Save seeding, then configure/preview/save the draw without dates or courts. Apply Draw Settings to Other Programs can generate opening draws for selected eligible programs with their own reviewed seeds. Select All includes eligible programs only. Use Schedule Event to select dated sessions, court subsets and generated rounds for each day; preview and confirm proposed slots. Programs advance independently when their own required results are complete. Existing match assignments remain unchanged when adding rounds. See [Scheduling](docs/SCHEDULING.md).
+3. In Event Details, save officials, and edit dates before scheduling if needed. Master Setting defines venue courts; choose each session's courts in Fixture â†’ Schedule. Set estimated match duration per round in Schedule. Create scoring rules in Game Setting Preset.
+4. In Fixture and Result, use Continue through the persistent Seeding â†’ Draw â†’ Schedule â†’ Fixture & Results steps. Save seeding, then configure/preview/save the draw without dates or courts. Apply Draw Settings to Other Programs can generate opening draws for selected eligible programs with their own reviewed seeds. Select All includes eligible programs only. Use Schedule Event to select dated sessions, court subsets and generated rounds for each day; preview and confirm proposed slots. Programs advance independently when their own required results are complete. Existing match assignments remain unchanged when adding rounds. See [Scheduling](docs/SCHEDULING.md).
 
 5. From Dashboard, select a saved game preset before assigning an unplayed match and issuing its tablet access code. Playing matches must switch to paper before manual reconciliation.
 
@@ -64,7 +64,7 @@ Seeding uses a combined Seeds / Participants count (2/8, 0/8 or NA/8), alongside
 
 For the shared four-step header, saved draw list, default Table View, preset defaults and required default presets and per-match scoring protection, see [Guided fixture planning](docs/FIXTURE_PLANNING.md).
 
-To change completed preparation, work backward: Reset Schedule → Reset Draw → Reset Seeding. Schedule reset keeps pairings and seeds. For an unplayed postponement, reset all saved schedules, change event dates (old sessions are cleared), then schedule the preserved draws again. Started/result rounds and waiting tablet bindings are protected. See [Scheduling](docs/SCHEDULING.md).
+To change completed preparation, work backward: Reset Schedule â†’ Reset Draw â†’ Reset Seeding. Schedule reset keeps pairings and seeds. For a postponement, extend the event in Edit Event, add the new session and move the affected matches. Started/result rounds and waiting tablet bindings are protected. See [Scheduling](docs/SCHEDULING.md).
 
 Business records now use readable server-generated IDs such as EV000001 and EV000001-P001. Existing installations need the additive business-ID schema upgrade; see [ID generation and database operations](docs/BUSINESS_IDS.md). The import template and external SBA IDs remain unchanged.
 

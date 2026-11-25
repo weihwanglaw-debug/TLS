@@ -10,9 +10,9 @@ def package():
  entries=[{'id':f'EN{i+1:03}','eventId':eventId,'programId':'PR001' if i<2 else 'PR002','participantIds':roster,'name':'','seed':i+1 if i<2 else None,'status':'A'} for i,roster in enumerate(rosters)]
  return {'schemaVersion':2,'source':'TRS','sourceSystemId':'trs-test','sourceTimeZone':'Asia/Singapore','exportedAt':datetime.now(timezone.utc).isoformat(),'registrationClosed':True,'hasFixtures':False,'events':[{'id':eventId,'name':'Import Test Event','venue':'Test Hall','startDate':first,'endDate':last,'maxProgramsPerParticipant':2,'status':'D'}],'programs':programs,'participants':people,'entries':entries}
 
-def workbook(template):
+def workbook(template, event_id=None):
  p=package();event=p['events'][0];event.update(startDate=(date.today()+timedelta(days=30)).isoformat(),endDate=(date.today()+timedelta(days=31)).isoformat());people={person['id']:person for person in p['participants']}
- rows={1:[['EventID','EventName','SportsType','StartDate','EndDate'],[event['id'],'Workbook Test Event','Badminton',event['startDate'],event['endDate']]],2:[['ProgramID','ProgramName','GameType','Gender','MinAge','MaxAge']],3:[['ParticipantID','ProgramID','GroupID','Name','Dob','Gender','Email','Mobile','Club/School/Company','Nationality','SbaId','Seed']]}
+ rows={1:[['EventID','EventName','SportsType','StartDate','EndDate'],[event_id or event['id'],'Workbook Test Event','Badminton',event['startDate'],event['endDate']]],2:[['ProgramID','ProgramName','GameType','Gender','MinAge','MaxAge']],3:[['ParticipantID','ProgramID','GroupID','Name','Dob','Gender','Email','Mobile','Club/School/Company','Nationality','SbaId','Seed']]}
  for program in p['programs']:rows[2].append([program['id'],program['name'],'Singles' if program['entryType']=='S' else 'Doubles',program['gender'],str(program['minAge']),str(program['maxAge'])])
  for entry in p['entries']:
   for id in entry['participantIds']:

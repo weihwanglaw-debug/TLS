@@ -61,6 +61,11 @@ test('event settings contain officials without court selection',async()=>{
 });
 
 test('event dates use the shared event save and refresh displayed dates',async()=>{
+ // Use dated windows so extending the event leaves the added day unused and removable.
+ const view=await (await fetch('/api/tournament/'+eventId)).json();
+ const dated=view.eventPlan.dailySessions.map((w:{start:string;end:string})=>({...w,date:view.eventInfo.startDate}));
+ const setup=await fetch('/api/tournament/event',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision:view.revision,plan:{...view.eventPlan,dailySessions:[],sessions:dated}})});
+ expect(setup.ok).toBe(true);
  const initial=await (await fetch('/api/setup/')).json();const original=initial.data.events.find((e:{id:string})=>e.id===eventId);
  let page:ReturnType<typeof render>;
  const refreshed=async()=>{const view=await (await fetch('/api/setup/')).json();page.rerender(<EventDetails view={view} eventId={eventId} onChanged={refreshed}/>);};
@@ -102,12 +107,12 @@ test('draw requires an active default, configured through the master before gene
  const saved=await (await fetch('/api/presets/')).json();expect(saved.presets[0].isDefault).toBe(true);
 });
 
-test('guided planning preserves the program between seeding, draw and event scheduling',async()=>{
+test('guided planning keeps program selection inside preparation and checks draws before scheduling',async()=>{
  const before=await (await fetch('/api/tournament/'+eventId)).json();render(<FixtureWorkspace eventId={eventId} programId={programId} initialStep="seeding" onBack={()=>{}} onChanged={done} onPresets={()=>{}}/>);
  await screen.findByRole('button',{name:'Continue to Draw'});const steps=screen.getByRole('navigation',{name:'Fixture planning steps'});
- fireEvent.click(screen.getByRole('button',{name:'Continue to Draw'}));await screen.findByText('Game Format');expect((screen.getByLabelText('Planning program') as HTMLSelectElement).value).toBe(programId);expect(within(steps).getByRole('button',{name:/2\. Draw/}).getAttribute('aria-current')).toBe('step');
- fireEvent.click(within(steps).getByRole('button',{name:/3\. Schedule/}));await screen.findByText('Plan tournament schedule');expect((screen.getByLabelText('Planning program') as HTMLSelectElement).disabled).toBe(true);expect(screen.getByRole('button',{name:'Program Fixture List'})).toBeTruthy();expect(screen.queryByText('Choose the date to plan its sessions, courts and program rounds.')).toBeNull();
- fireEvent.click(screen.getByRole('button',{name:'Back',exact:true}));await screen.findByText('Game Format');expect((screen.getByLabelText('Planning program') as HTMLSelectElement).value).toBe(programId);expect((await (await fetch('/api/tournament/'+eventId)).json()).revision).toBe(before.revision);
+ fireEvent.click(screen.getByRole('button',{name:'Continue to Draw'}));await screen.findByText('Game Format');expect((screen.getByLabelText('Planning program') as HTMLSelectElement).value).toBe(programId);
+ fireEvent.click(within(steps).getByRole('button',{name:/3\. Schedule/}));await screen.findByText('Complete draws first');expect(screen.queryByLabelText('Planning program')).toBeNull();expect(screen.getByRole('button',{name:'← Fixture overview'})).toBeTruthy();
+ fireEvent.click(screen.getByRole('button',{name:'Go to Draw'}));await screen.findByText('Game Format');expect((screen.getByLabelText('Planning program') as HTMLSelectElement).value).toBe(programId);expect((await (await fetch('/api/tournament/'+eventId)).json()).revision).toBe(before.revision);
 });
 
 test('TRS sequence: overview, configure, swap preview, Back retains selection, confirm, bracket/table',async()=>{
@@ -163,22 +168,22 @@ test('seeding remains viewable and locked after the draw is saved',async()=>{
  expect((screen.getByRole('switch',{name:'Use Seeding'}) as HTMLButtonElement).disabled||!!screen.getByRole('switch',{name:'Use Seeding'}).closest('fieldset[disabled]')).toBe(true);
 });
 
-test('whole tournament planning saves sessions separately and confirms a full preview',async()=>{
+test('whole tournament planning saves the complete event only',async()=>{
  const v=await (await fetch('/api/tournament/'+eventId)).json();await fetch('/api/tournament/event',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision:v.revision,plan:{...v.eventPlan,dailySessions:[{start:'00:00:00',end:'12:00:00'},{start:'12:00:00',end:'23:59:00'}]}})});
  render(<EventSchedule eventId={eventId} onChanged={done} onBack={()=>{}}/>);
- await screen.findByText('Set match durations');
+ await screen.findByText('Match durations');
  fireEvent.change(screen.getByLabelText('Rest warning minutes'),{target:{value:'0'}});
  fireEvent.click(screen.getByRole('button',{name:'Continue to sessions'}));
  await screen.findByText('Set available sessions');
- fireEvent.click(screen.getByRole('button',{name:'Continue to assignment'}));
+ fireEvent.click(screen.getByRole('button',{name:'Continue to matches'}));
  await screen.findByRole('heading',{name:'Assign matches',exact:true});
  const auto=screen.getByRole('button',{name:'Auto Assign remaining'});await waitFor(()=>expect((auto as HTMLButtonElement).disabled).toBe(false));fireEvent.click(auto);
- await screen.findByText('All remaining matches allocated. Review the timetable before confirming.');
+ await screen.findByText('All matches assigned. Review and save.');
  const before=await (await fetch('/api/tournament/'+eventId)).json();expect(before.plans[0].matches.every((m:{start:string|null})=>!m.start)).toBe(true);
  fireEvent.click(screen.getByRole('button',{name:'Review timetable'}));
  await screen.findByText('No court/player clashes or rest warnings found.');
- fireEvent.click(screen.getByRole('button',{name:'Confirm schedule'}));
- await screen.findByText('Schedule confirmed. Round durations are locked.');
+ fireEvent.click(screen.getByRole('button',{name:'Save schedule'}));
+ await screen.findByText('Schedule saved.');
  const saved=await (await fetch('/api/tournament/'+eventId)).json();expect(saved.plans[0].matches.every((m:{start:string|null;court:number|null})=>m.start&&m.court)).toBe(true);expect(saved.eventPlan.dailySessions).toHaveLength(0);expect(saved.eventPlan.sessions).toHaveLength(2);
 });
 
@@ -189,14 +194,14 @@ test('saved schedule appears in bracket and table, with print grouped under Opti
  fireEvent.click(screen.getByRole('button',{name:'Options'}));expect(screen.getByRole('menuitem',{name:'Print / Save PDF'})).toBeTruthy();expect(screen.queryByRole('button',{name:'Print / Save PDF'})).toBeNull();expect(screen.getByRole('menuitem',{name:'Export Match Results (Selected Round)'})).toBeTruthy();expect(screen.queryByRole('button',{name:'Export CSV'})).toBeNull();
 });
 
-test('Edit Event retains locked dates when a fixture exists in any program',async()=>{
+test('Edit Event opens the date pickers with saved fixtures',async()=>{
  const saved=await (await fetch('/api/setup/')).json();render(<EventDetails view={saved} eventId={eventId} onChanged={done}/>);
- await editEvent();expect(screen.getByText('Reset Schedule before changing event dates. Started matches and results keep event dates locked.')).toBeTruthy();expect(screen.queryByRole('button',{name:'Start Date',exact:true})).toBeNull();expect(screen.queryByText('Event Courts')).toBeNull();
+ await editEvent();expect(screen.getByRole('button',{name:'Start Date',exact:true})).toBeTruthy();expect(screen.getByRole('button',{name:'End Date',exact:true})).toBeTruthy();expect(screen.queryByText('Event Courts')).toBeNull();
 });
 
 test('scheduled fixtures open the fourth step with Table View and keep the shared program header',async()=>{
  render(<FixtureWorkspace eventId={eventId} programId={programId} onChanged={done} onBack={()=>{}} onPresets={()=>{}}/>);
- await screen.findByRole('button',{name:'Table View'});const steps=screen.getByRole('navigation',{name:'Fixture planning steps'});expect(within(steps).getAllByRole('button')).toHaveLength(4);expect(within(steps).getByRole('button',{name:/4\. Fixture & Results/}).getAttribute('aria-current')).toBe('step');expect(screen.queryByText('Internal')).toBeNull();expect(screen.getByRole('region',{name:'Program details'})).toBeTruthy();
+ await screen.findByRole('button',{name:'Table View'});const steps=screen.getByRole('navigation',{name:'Fixture planning steps'});expect(within(steps).getAllByRole('button')).toHaveLength(4);expect(within(steps).getByRole('button',{name:/4\. Fixtures & Results/}).getAttribute('aria-current')).toBe('step');expect(screen.queryByText('Internal')).toBeNull();expect(screen.queryByRole('region',{name:'Program details'})).toBeNull();expect(screen.queryByLabelText('Planning program')).toBeNull();
  fireEvent.click(within(steps).getByRole('button',{name:/1\. Seeding/}));await screen.findByText(/Seeding is locked/);expect(screen.getByRole('switch',{name:'Use Seeding'}).getAttribute('aria-checked')).toBe('true');expect(screen.queryByRole('heading',{name:'Test Singles'})).toBeNull();expect((screen.getByLabelText('Planning program') as HTMLSelectElement).selectedOptions[0].textContent).toBe('Test Singles');
  fireEvent.click(within(steps).getByRole('button',{name:/2\. Draw/}));await screen.findByText('Saved Draw',{exact:true});expect(screen.queryByText('Round Game Presets')).toBeNull();expect(screen.queryByTitle('Select for swap')).toBeNull();expect(screen.queryByText('Bracket View')).toBeNull();
 });
@@ -206,6 +211,7 @@ test('standalone preset is selected before dashboard pairing code issuance',asyn
  await screen.findByText('UI standard rules',{exact:true});
  cleanup();
  render(<LiveDashboard onFixtures={()=>{}} onChanged={done}/>);
+ fireEvent.change(await screen.findByLabelText('Dashboard event'),{target:{value:eventId}});
  await screen.findByText(/Match Queue ·/);
  fireEvent.click(screen.getAllByRole('button',{name:/Assign to Court/}).find(b=>!(b as HTMLButtonElement).disabled)!);
  const select=await screen.findByLabelText('Game preset');
@@ -230,6 +236,7 @@ test('Programs is the final section in Event Details',async()=>{
 
 test('umpire uses saved service setup, point acknowledgements, scoresheet and paper handover',async()=>{
  render(<LiveDashboard onFixtures={()=>{}} onChanged={done}/>);
+ fireEvent.change(await screen.findByLabelText('Dashboard event'),{target:{value:eventId}});
  await screen.findByText(/Match Queue ·/);
  fireEvent.click(screen.getAllByRole('button',{name:/Assign to Court/}).find(b=>!(b as HTMLButtonElement).disabled)!);
  const presets=await (await fetch('/api/presets/')).json();
@@ -243,7 +250,7 @@ test('umpire uses saved service setup, point acknowledgements, scoresheet and pa
  cleanup();window.history.replaceState(null,'','/umpire/'+result.match.sessionId);render(<UmpireApp/>);
  await screen.findByText('Saved to venue');
  fireEvent.click(screen.getByRole('button',{name:'Start Warm-up'}));
- fireEvent.click(screen.getByRole('button',{name:/Start Game ·/}));
+ fireEvent.click(await screen.findByRole('button',{name:/Start Game ·/}));
  expect(document.querySelector('.umpire-dialog select')).toBeNull();
  expect(screen.getAllByText('Automatically selected')).toHaveLength(2);
  const servingGroup=screen.getByRole('group',{name:'Serving side'});
@@ -272,7 +279,7 @@ test('umpire uses saved service setup, point acknowledgements, scoresheet and pa
  localStorage.removeItem('tls-umpire-match');
 });
 
-test('dashboard requires one event, remembers selection and does not mix event queues',async()=>{
+test('dashboard lists current events and requires selection again on re-entry',async()=>{
  const source=await (await fetch('/api/setup/')).json();const data=source.data;
  const event=data.events.find((e:{id:string})=>e.id===eventId);
  const after=new Date(event.endDate+'T00:00:00Z');after.setUTCDate(after.getUTCDate()+2);const secondDate=after.toISOString().slice(0,10);
@@ -290,17 +297,14 @@ test('dashboard requires one event, remembers selection and does not mix event q
  const select=await screen.findByLabelText('Dashboard event');
  expect((select as HTMLSelectElement).value).toBe('');
  expect(screen.queryByRole('option',{name:'All Events'})).toBeNull();
- expect(screen.getByText('Select an event to view its dashboard.')).toBeTruthy();
+ expect(screen.queryByRole('option',{name:second.name})).toBeNull();
+ expect(screen.queryByText(/Match Queue/)).toBeNull();
  fireEvent.change(select,{target:{value:eventId}});
  await screen.findByText(/Match Queue ·/);
- fireEvent.change(select,{target:{value:second.id}});
- await screen.findByText('Match Queue · 0 Waiting');
- expect(screen.getAllByText('Fixture required')).toHaveLength(2);
- expect(localStorage.getItem('tls-dashboard-event')).toBe(second.id);
  const revision=(await (await fetch('/api/setup/')).json()).data.revision;
  cleanup();render(<LiveDashboard onFixtures={()=>{}} onChanged={done}/>);
- await screen.findByText('Match Queue · 0 Waiting');
- expect((screen.getByLabelText('Dashboard event') as HTMLSelectElement).value).toBe(second.id);
+ expect((await screen.findByLabelText('Dashboard event') as HTMLSelectElement).value).toBe('');
+ expect(screen.queryByText(/Match Queue/)).toBeNull();
  expect((await (await fetch('/api/setup/')).json()).data.revision).toBe(revision);
  localStorage.removeItem('tls-dashboard-event');
 });

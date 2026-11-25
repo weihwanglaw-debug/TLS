@@ -1,12 +1,21 @@
-# TLS visual design � 16 November 2026
+# Current appearance — restored light/dark themes, 17 November 2026
 
-Organiser and umpire controls use one fixed light appearance inspired by the scheduling prototype. Shared root tokens in Frontend/src/trs-theme.css define navy #233c58, page #f5f7fa, white inputs/panels, soft #eaf0f7, borders #dce3eb and burnt-orange actions #b74328. Shadcn primary/ring mappings, system typography and restrained radii follow the same design. Semantic feedback colours remain distinct. Shared organiser surfaces live in styles.css.
+TLS again uses the original two selectable palettes from commit `69dc815`: light Slate–Coral (`a`) and dark Obsidian–Rose (`b`). The sidebar's Toggle theme button switches modes and saves `livescore_theme` in browser storage. Refreshing restores that preference; invalid/unavailable storage falls back to light. The umpire screen reads the same saved preference on opening.
 
-SetupApp clears the obsolete livescore_theme preference safely and no longer toggles it. AdminLayout has no theme switch. UmpireApp always selects the fixed appearance. Root tokens are available before mounting, including direct tablet/display URLs. System dark appearance does not change control styling.
+Shared tokens, native input colour schemes and light/dark live-status colours are restored. The new scheduler inherits the selected palette instead of forcing light colours. White-only panel/card/table overrides are removed. The hall display keeps its dedicated presentation, team colours remain unchanged, and printing retains existing styles.
 
-The hall bigscreen keeps its dedicated fixed dark high-contrast presentation and configured team colours; this is not a selectable application mode. Umpire team colours and scoresheet print layout remain intact. Background-specific logo settings remain valid on navy navigation and light surfaces.
+Only presentation, its preference and appearance tests were changed. Scheduling, scores, result submission, API contracts, database records and server settings are untouched. Existing scheduling and unrelated working-tree changes are preserved. The running development frontend picks up the changes; deployed assets are not replaced.
 
-No API, backend, database, scoring or scheduling rule changed. No deployment, normal service restart or commit is included. Rollback restores only scoped pre-task frontend files and rebuilds; no data conversion is needed. Existing unrelated work must be preserved.
+Validation and rollback: run the frontend build and existing UI tests, check switching/reload, populated participant/schedule pages, dialogs and direct umpire/display URLs. Scoped pre-restoration backups are outside the repository. Restore only those scoped presentation files to undo this restoration.
 
+Verification completed: frontend production build passed (existing bundle-size advisory); all 286 frontend tests across 38 files passed. Real Chrome checks verified both participant palettes, switching, reload persistence, scheduler inputs, dark preset dialog, direct umpire preference and tablet navigation with no page errors. Browser checks used read-only operational APIs and an isolated browser profile; no business records were edited. Existing patches outside this presentation scope were compared against the pre-task snapshot and stayed identical.
 
-Verification: TypeScript and Vite production build passed. The full disposable SQL-backed frontend suite passed 269 tests across 37 files; the subsequent navigation test addition passed all 3 navigation checks (270 tests in combined coverage). Focused navigation/tablet-timer/bigscreen/scoresheet checks passed 38 tests before that addition. Browser checks on organiser offline dialog and tablet access at desktop/mobile sizes confirmed fixed light controls under system dark preference plus obsolete saved theme b, no theme switch and no JavaScript errors. Team/paper/display behaviour is covered by existing component tests; full populated-page visual review and physical printing remain unverified. Existing bundle-size advisory remains. No normal services were started.
+Files changed: `SetupApp.tsx`, `AdminLayout.tsx`, `UmpireApp.tsx`, `trs-theme.css`, `styles.css`, `live.css`, `schedule-planner.css`, `FoundationUi.tsx`, `Frontend/tests/admin-navigation.test.tsx` and this guide. No backend, database or API change.
+
+## Fixture and schedule hierarchy
+
+One event heading anchors the page. Main Seeding / Draw / Schedule / Fixtures & Results navigation defines task scope. Program selection belongs inside Seeding and Draw. Schedule and results show the whole event, with per-program actions attached to the corresponding results section.
+
+The schedule substeps are a smaller nested navigation row, not another set of equally prominent cards. Destination-labelled footer actions replace ambiguous floating Back buttons. Settings are prepared locally and saved together; no extra Save draft controls or repeated event headings exist.
+
+Necessary guidance uses `ui-help` with a consistent icon, border, spacing and short text beside the relevant control. Do not append explanatory paragraphs to otherwise complete screens. Placement errors appear beside the attempted round assignment; substantive warnings remain in the review section. Both light and dark palettes use shared tokens.

@@ -9,6 +9,7 @@ socket.setdefaulttimeout(1)
 base = 'http://localhost:5241/api/'
 checks = 0
 received = []
+failed = []
 fail = False
 key = 'publishing-test-key-' + 'x' * 32
 export_key = 'import-test-key-' + 'y' * 32
@@ -39,7 +40,7 @@ class Receiver(BaseHTTPRequestHandler):
   else: raw=self.rfile.read(int(self.headers['Content-Length']))
   body=json.loads(raw)
   if self.headers.get('X-TLS-Key') != key: self.send_error(401); return
-  if fail: self.send_error(503); return
+  if fail: failed.append((self.path,body)); self.send_error(503); return
   received.append((self.path,body));self.send_response(200);self.send_header('Content-Type','application/json');self.end_headers();self.wfile.write(b'{"accepted":true}')
 
 def check(condition):
@@ -60,7 +61,7 @@ def state(): return call('setup/')['data']
 def mutate(path, body, method='PUT'): return call(path,{'revision':state()['revision'],**body},method)
 
 for port in [5240,5241]:
- with socket.socket() as probe: assert probe.connect_ex(('127.0.0.1',port))!=0, 'Test port occupied'
+ with socket.socket() as probe: probe.settimeout(.5);assert probe.connect_ex(('127.0.0.1',port))!=0, 'Test port occupied'
 server=ThreadingHTTPServer(('127.0.0.1',5240),Receiver)
 threading.Thread(target=server.serve_forever,daemon=True).start()
 db=TestDatabase();process=None;log=tempfile.TemporaryFile(mode='w+t',encoding='utf-8')
@@ -101,7 +102,7 @@ try:
  revision=state()['revision']
  call('tournament/event-settings',{'revision':revision,'startDate':dates['endDate'],'endDate':dates['startDate'],'plan':draft,'publishing':disabled},'PUT',status=400)
  check(state()['revision']==revision and call('tournament/'+eid)['eventPlan']['matchMinutes']==35)
- rules={'name':'Short','gamesToWin':1,'pointsToWin':5,'winBy':1,'pointCap':5,'intervalAt':3,'decidingEndsAt':3}
+ rules={'name':'Short','gamesToWin':1,'pointsToWin':5,'winBy':1,'pointCap':5,'intervalAt':3,'intervalSeconds':0,'decidingEndsAt':3}
  preset=mutate('presets/',{'preset':{'id':'','name':'Integration','status':'A','isDefault':True,'rules':rules}})['presets'][0]['id']
  v=call('tournament/'+eid);plan=v['eventPlan'];plan.update(dailySessions=[{'start':'09:00:00','end':'18:00:00'}],matchMinutes=5,restMinutes=0,officials=[{'id':'temp','name':'Umpire'}])
  mutate('tournament/event',{'plan':plan})
@@ -140,7 +141,7 @@ try:
  mutate('trs/publishing/'+eid,generic)
  received.clear();call('trs/publishing/'+eid+'/resend',{},'POST')
  check(not any(path=='/api/integration/live-scores' for path,body in received))
- check(any(path=='/api/integration/results' and body['eventId']==71 and body['programId']==72 for path,body in received))
+ check(any(path=='/api/integration/results' and body['eventId']==71 and body['programId'] is None and [p['id'] for p in body['programs']]==[72] for path,body in received))
  mutate('trs/publishing/'+eid,{**generic,'intervalSeconds':2})
  for _ in range(50):
   if any(path=='/api/integration/live-scores' for path,body in received): break
@@ -151,18 +152,34 @@ try:
  match=call('tournament/'+eid)['plans'][0]['matches'][0]
  mutate('tournament/clear-result',{'matchId':match['id'],'matchVersion':match['matchVersion'],'reason':'Reset for replay'},'POST')
  response=call('trs/publishing/'+eid+'/resend?programId='+pid,{},'POST');check(bool(response['failures']))
+ attempted = [body for path,body in failed if path=='/api/integration/results'][-1]
  received.clear();fail=False
  for _ in range(100):
   if any(path.endswith('/results') and body['matches']==[] for path,body in received):break
   time.sleep(.1)
- check(any(path.endswith('/results') and body['matches']==[] for path,body in received))
+ check(any(path.endswith('/results') and body==attempted for path,body in received))
  # A new destination receives unchanged results without a manual resend.
  changed={**generic,'resultsUrl':'http://localhost:5240/new/results','intervalSeconds':2}
  mutate('trs/publishing/'+eid,changed)
- for _ in range(50):
+ for _ in range(200):
   if any(path=='/new/results' for path,body in received):break
   time.sleep(.1)
  check(any(path=='/new/results' and body['matches']==[] for path,body in received))
+ with urllib.request.urlopen(base+'setup/template',timeout=30) as response:
+  workbook = test_inputs.workbook(response.read(), '001')
+ upload = urllib.request.Request(base+'setup/preview?kind=excel&revision='+str(state()['revision']),data=workbook,method='POST',
+     headers={'Content-Type':'application/octet-stream'})
+ with urllib.request.urlopen(upload,timeout=30) as response:
+  excel = json.load(response)
+ imported = call('setup/confirm',{'token':excel['token'],'revision':excel['revision']},'POST')
+ workbook_event = next(event for event in imported['data']['events'] if event['name']=='Workbook Test Event')
+ workbook_id = workbook_event['id']
+ mutate('trs/publishing/'+workbook_id,{**generic,'resultsUrl':'http://localhost:5240/api/integration/event-results','apiKey':key})
+ check(not call('trs/publishing/'+workbook_id+'/resend',{},'POST')['failures'])
+ workbook_snapshot = next(body for path,body in reversed(received) if path=='/api/integration/event-results')
+ check(workbook_snapshot['eventId']==1 and workbook_snapshot['matches']==[])
+ check({program['reference'] for program in workbook_snapshot['programs']}=={'PR001','PR002'})
+ check(all(not program['canLink'] for program in workbook_snapshot['programs']))
  check(key not in json.dumps(state()))
  print(f'PASS: {checks} TRS transfer, original identity, publication, failure/recovery and restart checks.')
 except Exception:

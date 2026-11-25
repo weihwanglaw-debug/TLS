@@ -1,6 +1,8 @@
-# Planner booking cleanup — 16 November 2026
+# Current scheduling reset behaviour
 
-The [whole-tournament planner](TOURNAMENT_SCHEDULE_PLANNER.md) removes selected and dependent future booking references when schedules reset. Future-only rounds can be reset explicitly. Round-duration locks derive from current bookings, never history. In-page clear-draft retains confirmed bookings; it does not reset results. Event-date changes clear obsolete planner draft availability after existing schedule-reset eligibility checks.
+See [Event scheduling](TOURNAMENT_SCHEDULE_PLANNER.md). Schedule reset clears bookings from a selected date onward, inclusively, and blocks if any affected match is called, started, awaiting confirmation, completed or a walkover. It never clears results or deletes draws. Earlier bookings/results and all session availability remain. Byes retain automatic advancement and do not gain live-score rows. Duration/grid locks derive from current bookings and walkover correction references, not history. There is no persisted scheduling draft.
+
+Undo walkover validates the original slot, preserves future reserved times and rejects silent removal of later called/started/scored matches. Unplayed dependent draw records may be rebuilt by existing result correction. Optional earlier-time changes require an explicit preview and confirmation; undo restores their compact before/after timing batch only while the affected bookings are unchanged and uncalled/unstarted. Consecutive walkovers keep independent references for undo in reverse order. Successful undo, resets and invalidating redraws clean those references; audits never block eligibility.
 
 # Reset lifecycle (6 November 2026)
 
@@ -14,15 +16,15 @@ The selected match retains its scheduled slot, officials and scoring preset for 
 
 ## Reset Schedule
 
-Select one or more rounds. The action clears their results as well as start/end/court, officials, review availability, live scoring state and tablet assignments. It removes all later rounds in each selected program; selecting a group stage removes its knockout rounds. Initial pairings, seeds, participants, event settings and session hours remain. BYEs retain their structural automatic advancement, without played scores.
+Choose From date, review the affected dates and booking counts, then Confirm reset. The transaction checks every affected match again and rejects the whole reset if any is called, started, awaiting confirmation, completed or a walkover. Blockers are named in the preview. Releasing a call or correcting results is a separate deliberate operation; reset cannot perform it implicitly.
 
-Selecting all rounds resets the event schedule. There is no prerequisite to individually clear completed results or release called tablets. Repeating a reset is valid. Unknown rounds and stale revisions reject the entire transaction. A single RESET_SCHEDULE audit entry describes the event and selected rounds; no per-match reset audit entries are generated.
+For an eligible range, clear start/end/court, affected officials, review availability and empty live buffers, including future-only reservations. Keep all draw records/pairings, seeds, rankings/qualifiers, sessions/courts and duration settings. Earlier-day calls, bookings and results remain unchanged. A round spanning the cutoff keeps its duration locked while any earlier booking remains. Structural BYEs are untouched. Empty ranges, dates outside the event and stale revisions reject without changes. A single RESET_SCHEDULE audit entry records the event/date; no per-match reset audits are generated. Both reset API routes use `fromDate`; old round-selection payloads are rejected.
 
-Affected draft match IDs, move IDs and quantities are cleaned. Unrelated sessions/programs and their draft quantities remain. Changed draft cards require saving again. If no draft match selections remain, the draft is discarded. Date changes clear the event planning draft and obsolete session/day settings. Removing draws/rounds also cleans their draft references.
+Affected future bookings and walkover timing references are cleaned. Unrelated sessions/programs and bookings remain. There is no persisted schedule draft. Date changes clear obsolete session/day settings; removing draws/rounds also cleans their booking and undo references.
 
 ## Device and concurrency behavior
 
-Reset advances the match version and revokes affected tablet bindings. Old tokens cannot score a replay. An umpire receiving a definitive closed/revoked-session response clears the local pending action and returns to access-code entry. Network failures retain pending actions for retry. Revisions, command IDs and versions remain functional protections against duplicate points and stale writes.
+Reset advances affected unstarted match versions. Called bindings in the reset range block the transaction; bindings before the cutoff remain untouched. Explicit result correction/reset still revokes its affected tablet sessions. Old tokens cannot score a replay. An umpire receiving a definitive closed/revoked-session response clears the local pending action and returns to access-code entry. Revisions, command IDs and versions protect against duplicate points and stale writes.
 
 ## Same-day operation
 
@@ -30,7 +32,7 @@ Called and started matches must use an open court, have valid prerequisites and 
 
 ## Publication
 
-Confirmed results are published as complete snapshots, including an empty snapshot after clearing/resetting all results. Only successful deliveries suppress subsequent identical publications. Failures retry at max(5 seconds, configured interval). Changed destination/credential invalidates delivery signatures. Options > Submit Result is available for configured programs. Selecting it without completed/walkover results displays No result to submit. without making a request; automatic reset synchronization still sends empty snapshots. Restart sends current snapshots again using increasing persisted stream versions.
+Confirmed results are published as complete snapshots, including an empty snapshot after explicit result correction clears all results. Schedule reset preserves recorded results; it does not publish a fabricated empty result set. Only successful deliveries suppress subsequent identical publications. Failures retry at max(5 seconds, configured interval). Changed destination/credential invalidates delivery signatures. Options > Submit Result is available for configured programs. Selecting it without completed/walkover results displays No result to submit. without making a request. Restart sends current snapshots again using increasing persisted stream versions.
 
 Remote clearing is asynchronous and requires publishing enabled and a reachable receiver. Existing TRS manual results remain separately owned and retain their precedence. Reset never changes TRS registration/payment data.
 

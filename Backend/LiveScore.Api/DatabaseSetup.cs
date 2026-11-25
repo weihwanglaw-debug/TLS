@@ -15,6 +15,7 @@ internal static class DatabaseSetup
         if(args.Contains("--upgrade-live"))db.Database.ExecuteSqlRaw(File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"Sql","20261013_live.sql")).Replace("{","{{").Replace("}","}}"));
         if(args.Contains("--upgrade-sba"))db.Database.ExecuteSqlRaw(File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"Sql","20261021_sba_rankings.sql")));
         if(args.Contains("--upgrade-business-ids"))db.Database.ExecuteSqlRaw(File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"Sql","20261028_business_ids.sql")));
+        if(args.Contains("--upgrade-schedule")){ScheduleStorageUpgrade.Run(db,args);return;}
         if(args.Contains("--clear-test-records")){TestRecordCleanup.Run(db);return;}
         _=db.SystemSettings.Single(x=>x.Id==1); _=db.EventImports.Count();
         Console.WriteLine("TLS import schema ready.");

@@ -64,7 +64,7 @@ public static class LiveDashboard
             var plan=TournamentRules.Event(s,s.Programs.Single(p=>p.Id==m.ProgramId).EventId);
             var eligibleCourts=SessionCourts.EligibleCourts(s,plan,m,TimeZoneInfo.ConvertTime(now,SetupStore.Zone(s.TimeZone)).DateTime);
             if(eligibleCourts.Length==0&&m.Start.HasValue&&!m.PendingA&&!m.PendingB)waiting="Review session times and courts in Schedule";
-            queue.Add(new(LiveRuntime.Row(s,m),fit,planned.HasValue&&planned<now,planned.HasValue?Math.Max(0,(int)(now-planned.Value).TotalMinutes):0,waiting,eligibleCourts,SchedulePlanner.RestWarnings(s,m)));
+            queue.Add(new(LiveRuntime.Row(s,m),fit,planned.HasValue&&planned<now,planned.HasValue?Math.Max(0,(int)(now-planned.Value).TotalMinutes):0,waiting,eligibleCourts,SchedulePlanner.QueueWarnings(s,m)));
         }
         bool Included(TournamentMatch m)=>string.IsNullOrEmpty(eventId)||s.Programs.Single(p=>p.Id==m.ProgramId).EventId==eventId;
         var eventCourts=string.IsNullOrEmpty(eventId)?Enumerable.Range(1,s.CourtCount).ToArray():EventOperations.Courts(s,TournamentRules.Event(s,eventId));

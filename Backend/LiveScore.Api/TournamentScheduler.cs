@@ -36,7 +36,7 @@ public static class TournamentScheduler
         TournamentRules.Need(request.Courts.All(c=>EventOperations.Courts(data,eventPlan).Contains(c)),"Choose courts from Master Setting.");
         var sessions=EventOperations.Sessions(data,eventPlan).OrderBy(s=>s.Date).ThenBy(s=>s.Start).ToList();
 
-        var existing=Matches(data).Where(m=>m.Status!="BY"&&m.Start.HasValue&&m.End.HasValue).ToList();
+        var existing=Matches(data).Where(m=>m.Status is not (MatchStatus.Bye or MatchStatus.Walkover)&&m.Start.HasValue&&m.End.HasValue).ToList();
 
         foreach(var match in additions.Where(m=>m.Status!="BY"))
 
@@ -143,11 +143,11 @@ public static class TournamentScheduler
     {
 
         var program=data.Programs.Single(p=>p.Id==match.ProgramId);var plan=TournamentRules.Event(data,program.EventId);
-        if(plan.SchedulePlanner is not null&&match.Start.HasValue&&SchedulePlanner.Grid(match.Start.Value)!=match.Start.Value)
+        if(plan.SchedulePlanner is not null&&match.Start.HasValue&&SchedulePlanner.Grid(match.Start.Value,plan.SchedulePlanner.StartStepMinutes)!=match.Start.Value)
         {
             var slot=SchedulePlanner.Slots(data,program.EventId).SingleOrDefault(n=>n.MatchId==match.Id);
             var original=plan.SchedulePlanner.Bookings.SingleOrDefault(b=>b.SlotId==slot?.Id);
-            TournamentRules.Need(original is not null&&original.Start==match.Start&&original.Court==match.Court&&original.Minutes==match.DurationMinutes,"Planned match starts must use the 15-minute grid.");
+            TournamentRules.Need(original is not null&&original.Start==match.Start&&original.Court==match.Court&&original.Minutes==match.DurationMinutes,$"Planned match starts must use {plan.SchedulePlanner.StartStepMinutes}-minute steps.");
         }
         SchedulePlanner.ValidateCurrentOverride(data,program.EventId,match);
 
@@ -166,7 +166,7 @@ public static class TournamentScheduler
 
         var players=TournamentRules.Players(data,match);
 
-        foreach(var other in Matches(data).Where(m=>m.Id!=match.Id&&m.Status!="BY"&&m.Start.HasValue&&m.End.HasValue))
+        foreach(var other in Matches(data).Where(m=>m.Id!=match.Id&&m.Status is not (MatchStatus.Bye or MatchStatus.Walkover)&&m.Start.HasValue&&m.End.HasValue))
 
         {
 
@@ -174,7 +174,7 @@ public static class TournamentScheduler
 
             if(!TournamentRules.Overlap(match.Start.Value,match.End!.Value,Begin(other),Finish(other)))continue;
 
-            TournamentRules.Need(other.Court!=match.Court&&!TournamentRules.OfficialIds(other).Intersect(ids).Any()&&!shared,"This override conflicts with a court, player overlap or official assignment.");
+            TournamentRules.Need(other.Court!=match.Court&&(plan.SchedulePlanner is not null||!TournamentRules.OfficialIds(other).Intersect(ids).Any()&&!shared),"This override conflicts with a court, player overlap or official assignment.");
 
         }
 

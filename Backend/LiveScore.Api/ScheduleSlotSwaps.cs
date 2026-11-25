@@ -13,6 +13,8 @@ public static class ScheduleSlotSwaps
             TournamentRules.Need(m.Status==MatchStatus.Scheduled&&!FixtureResets.StartedOrScored(m)&&!s.Venue.Bindings.Any(x=>x.MatchId==m.Id),"Only unstarted, uncalled matches without recorded results can swap slots.");
             TournamentRules.Need(m.Start.HasValue&&m.End.HasValue&&m.Court.HasValue&&m.DurationMinutes>0,"Both matches need saved or previewed slots.");
         }
+        TournamentRules.Need(a.DurationMinutes==b.DurationMinutes,"Swap matches with the same estimated duration.");
+        TournamentRules.Need(a.ProgramId!=b.ProgramId||a.Phase==b.Phase&&a.Round==b.Round,"Swap matches in the same program only within the same stage and round.");
         var courtA=a.Court;var courtB=b.Court;
         (a.Start,b.Start)=(b.Start,a.Start);(a.Court,b.Court)=(b.Court,a.Court);
         a.End=a.Start!.Value.AddMinutes(a.DurationMinutes);b.End=b.Start!.Value.AddMinutes(b.DurationMinutes);

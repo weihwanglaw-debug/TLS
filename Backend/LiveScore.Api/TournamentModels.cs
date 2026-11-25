@@ -4,7 +4,6 @@ public sealed class EventPlan
 {
     public SchedulePlannerState? SchedulePlanner { get; set; }
     public TrsPublicationSettings Publication { get; set; } = new();
-    public PlanningDraft? PlanningDraft { get; set; }
     public string EventId { get; set; } = "";
     public List<DailySession> DailySessions { get; set; } = [];
     public int[] Courts { get; set; } = [];

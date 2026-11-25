@@ -53,6 +53,6 @@ public static class BadmintonServing
         live.Rallies.Add(new(m.Games.Count+1,beforeA,beforeB,live.A,live.B,winner,server,receiver,p.LeftSide,DateTimeOffset.UtcNow));
         if(m.Games.Count==m.Rules.GamesToWin*2-2&&!p.DecidingEndsChanged&&Math.Max(live.A,live.B)>=m.Rules.DecidingEndsAt)
         {p.LeftSide=Other(p.LeftSide);p.DecidingEndsChanged=true;}
-        if(Math.Max(beforeA,beforeB)<m.Rules.IntervalAt&&Math.Max(live.A,live.B)>=m.Rules.IntervalAt)live.IntervalUntil=DateTimeOffset.UtcNow.AddSeconds(m.Rules.IntervalSeconds);
+        if(m.Rules.IntervalSeconds>0&&Math.Max(beforeA,beforeB)<m.Rules.IntervalAt&&Math.Max(live.A,live.B)>=m.Rules.IntervalAt)live.IntervalUntil=DateTimeOffset.UtcNow.AddSeconds(m.Rules.IntervalSeconds);
     }
 }

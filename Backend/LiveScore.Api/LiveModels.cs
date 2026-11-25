@@ -30,6 +30,12 @@ public sealed class TabletBinding
 public sealed class LiveMatchState
 {
     public ServingState? Serving {get;set;}
+    [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? WarmupUntil {get;set;}
+    [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? PauseKind {get;set;}
+    [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? RetiredPlayerId {get;set;}
     public DateTimeOffset? IntervalUntil {get;set;}
     public List<RallyRecord> Rallies {get;set;}=[];
     public bool RallyHistoryComplete {get;set;}

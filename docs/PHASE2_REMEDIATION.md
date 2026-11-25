@@ -1,5 +1,7 @@
 # TLS practical remediation — 30 October 2026
 
+Historical phase report: saved schedule drafts described here were replaced on 17 November by the [complete-event scheduling workflow](TOURNAMENT_SCHEDULE_PLANNER.md). They are no longer supported.
+
 Normal operation remains Call → Pair → Score → Submit → Admin Confirm. No rules engine, identity system, database schema migration or operational-data cleanup was introduced.
 
 | Problem | Implemented fix | Main source files | Verification |

@@ -22,7 +22,7 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<TrsPublication>())
 builder.Services.AddSingleton<TrsConnection>();
 builder.Services.AddScoped<TrsIntegration>();
 var app = builder.Build();
-if (args.Contains("--initialize-sql") || args.Contains("--upgrade-imports") || args.Contains("--upgrade-tournament") || args.Contains("--upgrade-live") || args.Contains("--upgrade-sba") || args.Contains("--upgrade-business-ids") || args.Contains("--clear-test-records") || args.Contains("--schema-script"))
+if (args.Contains("--initialize-sql") || args.Contains("--upgrade-imports") || args.Contains("--upgrade-tournament") || args.Contains("--upgrade-live") || args.Contains("--upgrade-sba") || args.Contains("--upgrade-business-ids") || args.Contains("--clear-test-records") || args.Contains("--schema-script") || args.Contains("--upgrade-schedule"))
 {
     using var db = app.Services.GetRequiredService<IDbContextFactory<TLSDbContext>>().CreateDbContext();
     DatabaseSetup.Run(db, args); return;

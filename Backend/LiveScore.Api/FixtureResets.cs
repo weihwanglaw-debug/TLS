@@ -1,6 +1,9 @@
 namespace LiveScore.Api;
 
-public sealed record ResetScheduleRequest(long Revision,string EventId,string[] RoundKeys);
+public sealed record ResetScheduleRequest(long Revision,string EventId,DateOnly FromDate);
+public sealed record ResetDay(DateOnly Date,int Bookings);
+public sealed record ResetBlocker(string MatchId,string Name,DateOnly Date,int? Court,string Reason);
+public sealed record ResetSchedulePreview(long Revision,string EventId,DateOnly StartDate,DateOnly EndDate,DateOnly FromDate,int BookingCount,ResetDay[] Days,ResetBlocker[] Blockers);
 public static class FixtureResets
 {
     public static string Key(TournamentMatch m)=>$"{m.ProgramId}:{m.Phase}:{m.Round}";
@@ -15,42 +18,51 @@ public static class FixtureResets
         TournamentRules.Need(!matches.Any(m=>Slotted(m)||allocated.Contains(m.Id)),"Reset Schedule before resetting this draw or round.");
         var reason=Protection(s,matches);TournamentRules.Need(reason=="",reason);
     }
-    public static object List(SetupData s,string eventId)
+    private sealed record ResetRow(string SlotId,string? MatchId,DateOnly Date,int? Court,string Name,string Reason);
+    private static List<ResetRow> Range(SetupData s,string eventId,DateOnly fromDate)
     {
-        var rounds=s.ProgramPlans.Where(p=>s.Programs.Any(x=>x.Id==p.ProgramId&&x.EventId==eventId)).SelectMany(p=>p.Matches).Where(m=>m.Status!=MatchStatus.Bye).GroupBy(Key).Select(g=>
+        var ev=s.Events.SingleOrDefault(e=>e.Id==eventId);TournamentRules.Need(ev is not null,"Event not found.");
+        TournamentRules.Need(fromDate>=ev!.StartDate&&fromDate<=ev.EndDate,"Choose a date within the event.");
+        var programs=s.Programs.Where(p=>p.EventId==eventId).ToDictionary(p=>p.Id);var matches=s.ProgramPlans.Where(p=>programs.ContainsKey(p.ProgramId)).SelectMany(p=>p.Matches).ToDictionary(m=>m.Id);
+        string Reason(TournamentMatch m)=>m.Status==MatchStatus.Walkover?"Walkover result recorded.":m.Status==MatchStatus.Completed?"Completed result recorded.":m.Status==MatchStatus.Review?"Awaiting result confirmation.":StartedOrScored(m)||m.WinnerId is not null||m.Live is {A:>0} or {B:>0}?"Match has started or contains a result.":s.Venue.Bindings.Any(b=>b.MatchId==m.Id)?"Match has been called.":"";
+        var nodes=SchedulePlanner.Slots(s,eventId);var rows=new List<ResetRow>();
+        foreach(var booking in SchedulePlanner.Current(s,eventId,nodes).Where(b=>DateOnly.FromDateTime(b.Start)>=fromDate))
         {
-            var matches=g.ToList();var first=matches[0];var reason="";
-            return new{key=g.Key,name=s.Programs.Single(p=>p.Id==first.ProgramId).Name+" · "+first.RoundLabel,reason};
-        }).ToArray();return new{s.Revision,rounds};
+            var n=nodes.Single(n=>n.Id==booking.SlotId);var m=n.MatchId is {} id?matches[id]:null;
+            rows.Add(new(n.Id,n.MatchId,DateOnly.FromDateTime(booking.Start),booking.Court,n.ProgramName+" · "+n.RoundLabel+" · Match "+(n.Position+1),m is null?"":Reason(m)));
+        }
+        var represented=rows.Where(r=>r.MatchId is not null).Select(r=>r.MatchId).ToHashSet();
+        foreach(var m in matches.Values.Where(m=>m.Status!=MatchStatus.Bye&&m.Start.HasValue&&DateOnly.FromDateTime(m.Start.Value)>=fromDate&&!represented.Contains(m.Id)))
+            rows.Add(new(nodes.FirstOrDefault(n=>n.MatchId==m.Id)?.Id??"match:"+m.Id,m.Id,DateOnly.FromDateTime(m.Start!.Value),m.Court,programs[m.ProgramId].Name+" · "+m.RoundLabel+" · Match "+m.Number,Reason(m)));
+        return rows;
+    }
+    public static ResetSchedulePreview List(SetupData s,string eventId,DateOnly? fromDate=null)
+    {
+        var ev=s.Events.SingleOrDefault(e=>e.Id==eventId);TournamentRules.Need(ev is not null,"Event not found.");
+        var date=fromDate??ev!.StartDate;var rows=Range(s,eventId,date);
+        return new(s.Revision,eventId,ev!.StartDate,ev.EndDate,date,rows.Count,rows.GroupBy(r=>r.Date).OrderBy(g=>g.Key).Select(g=>new ResetDay(g.Key,g.Count())).ToArray(),rows.Where(r=>r.Reason!="").Select(r=>new ResetBlocker(r.MatchId!,r.Name,r.Date,r.Court,r.Reason)).ToArray());
     }
     public static void ResetSchedule(SetupData s,ResetScheduleRequest request)
     {
-        var plan=TournamentRules.Event(s,request.EventId);
-        TournamentRules.Need(request.RoundKeys is {Length:>0}&&request.RoundKeys.Distinct().Count()==request.RoundKeys.Length,"Select distinct eligible rounds.");
-        SchedulePlanner.RemoveRounds(s,plan,request.RoundKeys);
-        var rounds=s.ProgramPlans.Where(p=>s.Programs.Any(x=>x.Id==p.ProgramId&&x.EventId==request.EventId)).SelectMany(p=>p.Matches).Where(m=>m.Status!=MatchStatus.Bye).GroupBy(Key).ToDictionary(g=>g.Key,g=>g.ToList());
-        var targets=new List<TournamentMatch>();
-        foreach(var key in request.RoundKeys)
+        var rows=Range(s,request.EventId,request.FromDate);var blocked=rows.Where(r=>r.Reason!="").ToList();
+        TournamentRules.Need(blocked.Count==0,"Reset blocked: "+string.Join("; ",blocked.Take(8).Select(r=>r.Name+" ("+r.Date.ToString("yyyy-MM-dd")+"): "+r.Reason)));
+        TournamentRules.Need(rows.Count>0,"No bookings from this date onward.");
+        var plan=TournamentRules.Event(s,request.EventId);var ids=rows.Where(r=>r.MatchId is not null).Select(r=>r.MatchId!).ToHashSet();var slots=rows.Select(r=>r.SlotId).ToHashSet();
+        foreach(var m in s.ProgramPlans.SelectMany(p=>p.Matches).Where(m=>ids.Contains(m.Id)))
         {
-            TournamentRules.Need(rounds.TryGetValue(key,out var matches),"A selected round changed. Reload the schedule.");
-            targets.AddRange(matches!);
+            ResetResult(s,m);m.Start=null;m.End=null;m.Court=null;m.ReviewAvailable=false;m.UmpireId=null;m.ServiceJudgeId=null;m.LineJudgeIds=[];
         }
-        var ids=targets.Select(m=>m.Id).ToHashSet();
-        foreach(var program in s.ProgramPlans.Where(p=>p.Matches.Any(m=>ids.Contains(m.Id))).ToList())
+        if(plan.SchedulePlanner is {} state)
         {
-            var selected=program.Matches.Where(m=>request.RoundKeys.Contains(Key(m))).ToList();
-            var removed=RemoveDependents(s,program,selected);
-            ids.UnionWith(removed);
-            foreach(var m in selected.Where(m=>program.Matches.Contains(m))) { ResetResult(s,m);m.Start=null;m.End=null;m.Court=null;m.ReviewAvailable=false;m.UmpireId=null;m.ServiceJudgeId=null;m.LineJudgeIds=[];ids.Add(m.Id); }
-            program.RankingDecisions.RemoveAll(d=>selected.Any(m=>m.GroupId==d.GroupId));
-            program.OfficialDecisions.RemoveAll(d=>ids.Contains(d.MatchId));
-            RefreshPhase(program);
+            state.Bookings.RemoveAll(b=>slots.Contains(b.SlotId));
+            foreach(var key in state.WalkoverMoves.Where(pair=>ids.Contains(pair.Key)||pair.Value.Any(move=>slots.Contains(move.Before.SlotId))).Select(pair=>pair.Key).ToList())state.WalkoverMoves.Remove(key);
+            state.Notices=[$"Schedule cleared from {request.FromDate:dd MMM yyyy}: {rows.Count} bookings removed."];
         }
-        CleanPlanning(s,plan,ids);
-        TournamentRules.Save(s.EventPlans,plan,p=>p.EventId);
+        CleanPlanning(s,plan,ids);TournamentRules.Save(s.EventPlans,plan,p=>p.EventId);
     }
     public static void ResetResult(SetupData s,TournamentMatch m)
     {
+        foreach(var ev in s.EventPlans)ev.SchedulePlanner?.WalkoverMoves.Remove(m.Id);
         s.Venue.Bindings.RemoveAll(b=>b.MatchId==m.Id);
         m.Live=new(){Version=m.MatchVersion+1};
         m.Status=m.EntryB is null&&!m.PendingB?MatchStatus.Bye:MatchStatus.Scheduled;
@@ -93,12 +105,7 @@ public static class FixtureResets
         }
         plan.ScheduleDays=plan.ScheduleDays.Select(d=>d with{MatchIds=d.MatchIds.Where(id=>!ids.Contains(id)&&matches.ContainsKey(id)).ToArray()}).ToList();
         plan.Sessions=plan.Sessions.Select(Clean).ToList();
-        if(plan.PlanningDraft is {} draft)
-        {
-            var sessions=draft.Sessions.Select(Clean).ToList();
-            var dirty=draft.DirtySessions.Concat(draft.Sessions.Select((w,i)=>(w,i)).Where(x=>x.w.MatchIds?.Any(id=>ids.Contains(id)||!matches.ContainsKey(id))==true).Select(x=>x.i)).Distinct().Order().ToArray();
-            plan.PlanningDraft=sessions.Any(w=>w.MatchIds?.Length>0)?draft with{Sessions=sessions,DirtySessions=dirty,MoveMatchIds=draft.MoveMatchIds.Where(id=>!ids.Contains(id)&&matches.ContainsKey(id)).ToArray()}:null;
-        }
+
     }
     public static void ResetSeeds(SetupData s,string programId)
     {

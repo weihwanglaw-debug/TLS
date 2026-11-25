@@ -65,10 +65,8 @@ try:
   seed=call('seeding/'+p['id']);call('seeding/'+p['id'],{'revision':rev(),'mode':'N','seedCount':0,'seeds':{e['id']:None for e in seed['entries']}},method='PUT');draw(p['id'])
  start=now()+timedelta(seconds=15);end=start+timedelta(minutes=60)
  window={'date':start.date().isoformat(),'start':start.time().isoformat(),'end':end.time().isoformat(),'courts':[1,2,3,4],'matchIds':[m['id'] for m in matches()],'programLimits':{p['id']:2 for p in s['programs']}}
- call('scheduling/draft',{'revision':rev(),'eventId':eid,'sessions':[window],'sessionIndex':0,'dirtySessions':[],'moveMatchIds':[]})
- check(view()['eventPlan']['planningDraft']['sessions']==[window]);check(all(m['start'] is None for m in matches()))
  p=call('scheduling/preview',{'revision':rev(),'eventId':eid,'sessions':[window],'matchMinutes':5,'restMinutes':0,'days':[{'date':window['date'],'courts':window['courts'],'matchIds':window['matchIds']}]})
- check(len(p['matches'])==8);call('scheduling/confirm',{'revision':p['revision'],'token':p['token']});check(view()['eventPlan']['planningDraft'] is None)
+ check(len(p['matches'])==8);call('scheduling/confirm',{'revision':p['revision'],'token':p['token']});check('planningDraft' not in view()['eventPlan'])
  time.sleep(max(0,(start-now()).total_seconds())+.2)
  active=[next(m for m in sorted(matches(),key=lambda m:m['start']) if m['court']==c) for c in range(1,5)]
  tokens=[join(m,c,officials[c-1]['id'],'load-tablet-'+str(c)) for c,m in enumerate(active,1)]

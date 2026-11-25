@@ -17,7 +17,7 @@ public sealed class TrsPublication(SetupStore store, IDbContextFactory<TLSDbCont
     private readonly ConcurrentDictionary<string, PublicationFailure> failures = new();
     private readonly Dictionary<string, DateTimeOffset> liveAt = [];
     private readonly Dictionary<string, string> resultSignatures = [];
-    private readonly Dictionary<string, (string Signature, DateTimeOffset Next)> resultRetries = [];
+    private readonly Dictionary<string, (string Signature, DateTimeOffset Next, TrsScoreSnapshot Snapshot)> resultRetries = [];
     private readonly Dictionary<string, string> liveSignatures = [];
     public PublicationFailure[] Failures(string? eventId) => failures.Values.Where(f => string.IsNullOrEmpty(eventId) || f.EventId == eventId).OrderBy(f => f.At).ToArray();
 
@@ -48,11 +48,12 @@ public sealed class TrsPublication(SetupStore store, IDbContextFactory<TLSDbCont
         {
             ValidateUrl(request.LiveUrl); ValidateUrl(request.ResultsUrl.Replace("{programId}", "1"));
         }
-        TournamentRules.Need(s.Imports.Any(i => i.EventId == eventId && i.Source == "TRS"), "Publishing requires an event imported from TRS.");
+        TournamentRules.Need(s.Imports.Any(i => i.EventId == eventId), "Publishing requires an imported event.");
         if (request.Enabled)
         {
             _ = SourceId(s, eventId, eventId, "event");
-            foreach (var program in s.Programs.Where(p => p.EventId == eventId)) _ = SourceId(s, eventId, program.Id, "program");
+            if (UsesLegacyResults(request.ResultsUrl))
+                foreach (var program in s.Programs.Where(p => p.EventId == eventId)) _ = SourceId(s, eventId, program.Id, "program");
         }
         var old = TournamentRules.Event(s, eventId).Publication;
         var key = string.IsNullOrWhiteSpace(request.ApiKey) ? old.ProtectedCredential : protector.Protect(request.ApiKey.Trim());
@@ -116,25 +117,27 @@ public sealed class TrsPublication(SetupStore store, IDbContextFactory<TLSDbCont
             foreach (var ev in s.Events.Where(e => eventId is null || e.Id == eventId))
             {
                 var settings = TournamentRules.Event(s, ev.Id).Publication;
-                if (!settings.Enabled) { foreach(var program in s.Programs.Where(p=>p.EventId==ev.Id)){resultSignatures.Remove(program.Id);resultRetries.Remove(program.Id);} foreach (var key in failures.Where(f => f.Value.EventId == ev.Id).Select(f => f.Key)) failures.TryRemove(key, out _); continue; }
+                if (!settings.Enabled)
+                {
+                    foreach (var key in resultSignatures.Keys.Concat(resultRetries.Keys).Distinct().Where(k => k.StartsWith(ev.Id + ":", StringComparison.Ordinal)).ToArray())
+                    {
+                        resultSignatures.Remove(key);
+                        resultRetries.Remove(key);
+                    }
+                    foreach (var key in failures.Where(f => f.Value.EventId == ev.Id).Select(f => f.Key)) failures.TryRemove(key, out _);
+                    continue;
+                }
                 var live = Snapshot(s, ev.Id, null, true);
-                var signature = Signature(live);
+                var signature = JsonSerializer.Serialize(live.Matches.Select(m => new { m.Id, m.Status, m.GamePhase, m.PhaseUntil }));
                 var now = DateTimeOffset.UtcNow;
                 if (force || !liveAt.TryGetValue(ev.Id, out var previous) || (now - previous).TotalSeconds >= settings.IntervalSeconds
-                    || live.Matches.Length == 0 && liveSignatures.GetValueOrDefault(ev.Id) != signature)
+                    || liveSignatures.GetValueOrDefault(ev.Id) != signature)
                 {
                     liveAt[ev.Id] = now; liveSignatures[ev.Id] = signature;
-                    await Send(s, ev.Id, settings, live, true, ct);
+                    await Send(ev.Id, settings, Stamp(ev.Id, live, true), true, ct);
                 }
-                foreach (var program in s.Programs.Where(p => p.EventId == ev.Id))
-                {
-                    var result = Snapshot(s, ev.Id, program.Id, false);
-                    var fingerprint = DeliverySignature(settings,result);
-                    if (!force && resultSignatures.GetValueOrDefault(program.Id) == fingerprint) continue;
-                    if (!force && resultRetries.TryGetValue(program.Id,out var retry) && retry.Signature==fingerprint && retry.Next>DateTimeOffset.UtcNow) continue;
-                    if(await Send(s, ev.Id, settings, result, false, ct)){resultSignatures[program.Id]=fingerprint;resultRetries.Remove(program.Id);}
-                    else resultRetries[program.Id]=(fingerprint,DateTimeOffset.UtcNow.AddSeconds(Math.Max(5,settings.IntervalSeconds)));
-                }
+                foreach (var result in ResultSnapshots(s, ev.Id, settings))
+                    await PublishResult(ev.Id, settings, result, force, ct);
             }
         }
         finally { gate.Release(); }
@@ -149,32 +152,81 @@ public sealed class TrsPublication(SetupStore store, IDbContextFactory<TLSDbCont
             var settings = TournamentRules.Event(s, eventId).Publication;
             TournamentRules.Need(settings.Enabled && !string.IsNullOrWhiteSpace(settings.ResultsUrl) && settings.ProtectedCredential.Length > 0,
                 "Configure and enable Score Publishing before resending results.");
-            var programs = s.Programs.Where(p => p.EventId == eventId && (programId is null || p.Id == programId)).ToArray();
-            TournamentRules.Need(programs.Length > 0, "Choose a program belonging to this event.");
-            var results = programs.Select(p => (Program: p, Snapshot: Snapshot(s, eventId, p.Id, false))).ToArray();
-            TournamentRules.Need(results.Length > 0, "No confirmed results are available to send.");
+            if (programId is not null)
+                TournamentRules.Need(s.Programs.Any(p => p.EventId == eventId && p.Id == programId), "Choose a program belonging to this event.");
             var errors = new List<PublicationFailure>();
-            foreach (var row in results)
+            foreach (var result in ResultSnapshots(s, eventId, settings, programId))
             {
-                var fingerprint=DeliverySignature(settings,row.Snapshot);
-                if(await Send(s, eventId, settings, row.Snapshot, false, ct)){resultSignatures[row.Program.Id]=fingerprint;resultRetries.Remove(row.Program.Id);}
-                else resultRetries[row.Program.Id]=(fingerprint,DateTimeOffset.UtcNow.AddSeconds(Math.Max(5,settings.IntervalSeconds)));
-                if (failures.TryGetValue(eventId + ":results:" + row.Snapshot.ProgramId, out var failure)) errors.Add(failure);
+                await PublishResult(eventId, settings, result, true, ct);
+                if (failures.TryGetValue(FailureKey(eventId, result, false), out var failure)) errors.Add(failure);
             }
             return errors.ToArray();
         }
         finally { gate.Release(); }
     }
 
-    private async Task<bool> Send(SetupData s, string eventId, TrsPublicationSettings settings, TrsScoreSnapshot snapshot, bool live, CancellationToken ct)
+    private static bool UsesLegacyResults(string url) => url.Contains("{programId}", StringComparison.Ordinal);
+
+    private static IEnumerable<TrsScoreSnapshot> ResultSnapshots(SetupData s, string eventId, TrsPublicationSettings settings, string? programId = null)
+    {
+        if (!UsesLegacyResults(settings.ResultsUrl))
+        {
+            yield return Snapshot(s, eventId, null, false);
+            yield break;
+        }
+        foreach (var program in s.Programs.Where(p => p.EventId == eventId && (programId is null || p.Id == programId)))
+            yield return Snapshot(s, eventId, program.Id, false);
+    }
+
+    private async Task PublishResult(string eventId, TrsPublicationSettings settings, TrsScoreSnapshot snapshot, bool force, CancellationToken ct)
+    {
+        var key = FailureKey(eventId, snapshot, false);
+        var fingerprint = DeliverySignature(settings, snapshot);
+        if (!force && resultSignatures.GetValueOrDefault(key) == fingerprint)
+        {
+            resultRetries.Remove(key);
+            failures.TryRemove(key, out _);
+            return;
+        }
+        if (!force && resultRetries.TryGetValue(key, out var retry) && retry.Signature == fingerprint)
+        {
+            if (retry.Next > DateTimeOffset.UtcNow) return;
+            snapshot = retry.Snapshot;
+        }
+        else
+        {
+            snapshot = Stamp(eventId, snapshot, false);
+        }
+
+        if (await Send(eventId, settings, snapshot, false, ct))
+        {
+            resultSignatures[key] = fingerprint;
+            resultRetries.Remove(key);
+        }
+        else
+        {
+            resultSignatures.Remove(key);
+            resultRetries[key] = (fingerprint, DateTimeOffset.UtcNow.AddSeconds(Math.Max(5, settings.IntervalSeconds)), snapshot);
+        }
+    }
+
+    private static string FailureKey(string eventId, TrsScoreSnapshot snapshot, bool live) =>
+        live ? eventId + ":live" : eventId + ":results:" + (snapshot.ProgramId?.ToString() ?? "event");
+
+    private TrsScoreSnapshot Stamp(string eventId, TrsScoreSnapshot snapshot, bool live) =>
+        snapshot with { Version = ReserveVersion(eventId, live ? "live" : "result:" + (snapshot.ProgramId?.ToString() ?? "event")),
+            GeneratedAt = DateTimeOffset.FromUnixTimeMilliseconds(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()) };
+
+    private async Task<bool> Send(string eventId, TrsPublicationSettings settings, TrsScoreSnapshot snapshot, bool live, CancellationToken ct)
     {
         var kind = live ? "live" : "results";
-        var failureKey = eventId + ":" + kind + (live ? "" : ":" + snapshot.ProgramId);
+        var failureKey = FailureKey(eventId, snapshot, live);
         try
         {
-            var url = live ? settings.LiveUrl : settings.ResultsUrl.Replace("{programId}", snapshot.ProgramId!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            var url = live ? settings.LiveUrl : snapshot.ProgramId is int id
+                ? settings.ResultsUrl.Replace("{programId}", id.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                : settings.ResultsUrl;
             ValidateUrl(url);
-            snapshot = snapshot with { Version = ReserveVersion(eventId, live ? "live" : "result:" + snapshot.ProgramId), GeneratedAt = DateTimeOffset.UtcNow };
             using var request = new HttpRequestMessage(HttpMethod.Put, url) { Content = JsonContent.Create(snapshot) };
             request.Headers.Add("X-TLS-Key", protector.Unprotect(settings.ProtectedCredential));
             using var response = await clients.CreateClient("trs-publication").SendAsync(request, ct);
@@ -215,11 +267,38 @@ public sealed class TrsPublication(SetupStore store, IDbContextFactory<TLSDbCont
         return value;
     }
 
+    private static string? ImportedReference(SetupData s, string eventId, string id) =>
+        s.ImportIdentities.Values.SingleOrDefault(x => x.EventId == eventId && x.LocalId == id && x.Kind == "program")?.SourceId;
+
+    private static Dictionary<string, PublishedProgram> ProgramDirectory(SetupData s, string eventId, IEnumerable<SetupProgram> programs)
+    {
+        var directory = new Dictionary<string, PublishedProgram>();
+        var used = new HashSet<int>();
+        var pending = new List<(SetupProgram Program, string Reference)>();
+        foreach (var program in programs.OrderBy(p => p.Id, StringComparer.Ordinal))
+        {
+            var reference = ImportedReference(s, eventId, program.Id) ?? program.Id;
+            if (int.TryParse(reference.Split(':').Last(), out var id) && id > 0 && used.Add(id))
+                directory.Add(program.Id, new(id, program.Name, reference, true));
+            else
+                pending.Add((program, reference));
+        }
+        var next = int.MaxValue;
+        foreach (var (program, reference) in pending)
+        {
+            while (!used.Add(next)) next--;
+            directory.Add(program.Id, new(next, program.Name, reference, false));
+            next--;
+        }
+        return directory;
+    }
+
     public static TrsScoreSnapshot Snapshot(SetupData s, string eventId, string? programId, bool live)
     {
         var ev = s.Events.Single(e => e.Id == eventId);
         var settings = TournamentRules.Event(s, eventId).Publication;
         var programs = s.Programs.Where(p => p.EventId == eventId && (programId is null || p.Id == programId)).ToDictionary(p => p.Id);
+        var directory = ProgramDirectory(s, eventId, programs.Values);
         SpectatorEntry Entry(string? id)
         {
             var entry = s.Entries.SingleOrDefault(e => e.Id == id);
@@ -227,22 +306,23 @@ public sealed class TrsPublication(SetupStore store, IDbContextFactory<TLSDbCont
             var sourceId = s.ImportIdentities.Values.SingleOrDefault(x => x.EventId == eventId && x.LocalId == id && x.Kind == "entry")?.SourceId ?? id ?? "BYE";
             return new(sourceId, !string.IsNullOrWhiteSpace(entry?.Name) ? entry.Name : players.Length > 0 ? string.Join(" / ", players) : "BYE", players, entry?.Seed);
         }
-        var matches = TournamentScheduler.Matches(s).Where(m => programs.ContainsKey(m.ProgramId) && (live ? MatchStatus.Occupied(m.Status) : MatchStatus.Finished(m.Status)))
+        var matches = TournamentScheduler.Matches(s).Where(m => programs.ContainsKey(m.ProgramId) && (live ? MatchStatus.Occupied(m.Status)||m.Status==MatchStatus.Scheduled&&m.Live?.WarmupUntil is not null&&s.Venue.Bindings.Any(b=>b.MatchId==m.Id) : MatchStatus.Finished(m.Status)))
             .OrderBy(m => m.Phase == "G" ? 0 : 1).ThenBy(m => m.Round).ThenBy(m => m.Number).Select(m => {
                 var plan = s.ProgramPlans.Single(p => p.ProgramId == m.ProgramId);
                 var row = LiveRuntime.Row(s, m);
                 var date = m.ActualStartedAt ?? m.Start;
                 var finish = m.ActualFinishedAt ?? m.End;
-                return new SpectatorMatch(m.Id, SourceId(s, eventId, m.ProgramId, "program"), programs[m.ProgramId].Name,
+                return new SpectatorMatch(m.Id, directory[m.ProgramId].Id, programs[m.ProgramId].Name,
                     m.Phase, m.Round, m.Phase == "G" ? "Group Stage" : m.RoundLabel,
                     plan.Groups.FirstOrDefault(g => g.Id == m.GroupId)?.Name ?? m.GroupId ?? "", Entry(m.EntryA), Entry(m.EntryB),
                     m.Games, m.WinnerId == m.EntryA ? "A" : m.WinnerId is not null && m.WinnerId == m.EntryB ? "B" : null,
                     m.Status == MatchStatus.Bye ? "BY" : m.Status == MatchStatus.Walkover ? "WO" : m.ResultKind,
                     "", date?.ToString("yyyy-MM-dd") ?? "", date?.ToString("HH:mm") ?? "", finish?.ToString("HH:mm") ?? "",
-                    m.Court?.ToString() ?? "", m.Status == MatchStatus.Walkover ? "W" : m.Status, live ? row.ScoreA : null, live ? row.ScoreB : null, live ? m.Live?.Serving?.ServerSide : null);
+                    m.Court?.ToString() ?? "", m.Status == MatchStatus.Walkover ? "W" : m.Status, live ? row.ScoreA : null, live ? row.ScoreB : null, live ? m.Live?.Serving?.ServerSide : null,
+                    live ? row.GamePhase : null, live ? row.PhaseUntil : null, live ? row.GameNumber : null);
             }).ToArray();
         return new(1, SourceId(s, eventId, eventId, "event"), ev.Name, programId is null ? null : SourceId(s, eventId, programId, "program"),
-            programId is null ? "" : programs[programId].Name, 0, DateTimeOffset.UtcNow, s.TimeZone, settings.IntervalSeconds, matches);
+            programId is null ? "" : programs[programId].Name, 0, DateTimeOffset.UtcNow, s.TimeZone, settings.IntervalSeconds, matches, programId is null && !live ? directory.Values.ToArray() : null);
     }
 
     public static void Map(WebApplication app)

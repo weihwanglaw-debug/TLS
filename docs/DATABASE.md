@@ -76,6 +76,10 @@ IdSequences and ImportIdMappings store permanent counters and original-source-to
 
 ## Phase 2 additive operation JSON — 30 October 2026
 
-No schema migration or operational-data cleanup is required. EventOperation JSON adds PlanningDraft. ProgramOperation JSON adds ranking decisions, qualifier origins, official result decisions, result-kind/reason, dependent-source/pending markers and per-match court exceptions. Older JSON remains readable through defaults. Current partial score is derived from live state for the API and excluded from fixture JSON so rally writes keep their existing persistence scope. MatchLiveRecord and existing audit storage remain in use.
+This phase originally added saved planning drafts to EventOperation JSON; the 17 November scheduling workflow removes those fields. ProgramOperation JSON adds ranking decisions, qualifier origins, official result decisions, result-kind/reason, dependent-source/pending markers and per-match court exceptions. Current partial score is derived from live state for the API and excluded from fixture JSON so rally writes keep their existing persistence scope. MatchLiveRecord and existing audit storage remain in use.
 
 Rollback requires coordinated application rollback. Earlier binaries may ignore/drop new JSON fields on save and cannot safely represent exceptional results or pending replay dependencies. Do not downgrade an event using these features mid-tournament; retain/export its operation/history data and complete or reconcile recovery first.
+
+## Complete-event scheduling — 17 November 2026
+
+No tables or columns change. Confirmed EventOperation schedule state stores round durations, rest-warning minutes, start-time steps and future-round bookings. Unfinished timetables stay in browser memory. Before starting the new strict JSON reader, use the backed-up `--upgrade-schedule` utility to remove only obsolete `planningDraft` and `schedulePlanner.draft` properties. The utility increments the global revision only when it changes rows. Match schedules, results and live records are preserved. See [scheduling operations and rollback](TOURNAMENT_SCHEDULE_PLANNER.md#upgrade-backup-and-rollback).

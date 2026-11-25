@@ -37,15 +37,15 @@ public static class LiveEndpoints
             var ev=events[m.ProgramId];
             return ev.StartDate<=today&&today<=ev.EndDate&&DateOnly.FromDateTime(m.Start.Value)==today&&DateOnly.FromDateTime(TournamentScheduler.Finish(m))==today;
         }
-        var matches=TournamentScheduler.Matches(s).Where(m=>m.Court.HasValue&&(MatchStatus.Occupied(m.Status)||FinishedToday(m)))
-            .GroupBy(m=>m.Court).Select(g=>g.OrderByDescending(m=>MatchStatus.Occupied(m.Status))
+        var matches=TournamentScheduler.Matches(s).Where(m=>m.Court.HasValue&&(MatchStatus.Occupied(m.Status)||m.Status==MatchStatus.Scheduled&&m.Live?.WarmupUntil is not null&&s.Venue.Bindings.Any(b=>b.MatchId==m.Id)||FinishedToday(m)))
+            .GroupBy(m=>m.Court).Select(g=>g.OrderByDescending(m=>MatchStatus.Occupied(m.Status)||m.Status==MatchStatus.Scheduled)
                 .ThenByDescending(TournamentScheduler.Finish).ThenByDescending(m=>m.Number).ThenBy(m=>m.Id,StringComparer.Ordinal).First())
             .OrderBy(m=>m.Court).Select(m=>{
                 var p=s.Programs.Single(p=>p.Id==m.ProgramId);var row=LiveRuntime.Row(s,m);
                 var winner=m.WinnerId is null?null:m.WinnerId==m.EntryA?"A":m.WinnerId==m.EntryB?"B":null;
                 return new{id=m.Id,number=m.Number,court=m.Court,programName=p.Name,eventName=events[m.ProgramId].Name,
                     row.RoundLabel,nameA=row.NameA,nameB=row.NameB,status=m.Status,scoreA=row.ScoreA,scoreB=row.ScoreB,
-                    games=m.Games,serverSide=m.Live?.Serving?.ServerSide,matchWon=row.MatchWon,winner};
+                    games=m.Games,serverSide=m.Live?.Serving?.ServerSide,matchWon=row.MatchWon,winner,row.GamePhase,row.PhaseUntil,row.GameNumber,row.ResultKind};
             }).ToArray();
         return new{config=s.Venue.Display.ForScreen(),serverTime=now,matches};
     }

@@ -33,11 +33,11 @@ test('save failure retains the draft for correction without reporting success',a
  expect((screen.getByLabelText('Official name') as HTMLInputElement).value).toBe('Saved draft official');
 });
 
-test('existing date locks do not prevent editing other event settings',async()=>{
+test('both date pickers remain available when editing event settings',async()=>{
  service.api.mockImplementation(async(path:string)=>path.startsWith('trs/')?publication:{...view,datesEditable:false});
  render(<EventSettings eventId="E" onChanged={async()=>{}}/>);
  fireEvent.click(await screen.findByRole('button',{name:'Edit Event'}));await screen.findByRole('button',{name:'Save Event'});
- expect(screen.queryByRole('button',{name:'Start Date',exact:true})).toBeNull();
+ expect(screen.getByRole('button',{name:'Start Date',exact:true})).toBeTruthy();
  expect((screen.getByRole('button',{name:'Add Official'}) as HTMLButtonElement).disabled).toBe(false);expect(screen.queryByLabelText('Estimated match minutes')).toBeNull();
 });
 

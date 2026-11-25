@@ -30,7 +30,7 @@ try{$cmd=$cn.CreateCommand();$cmd.CommandText='UPDATE Events SET StartDate=@firs
 """
  result=subprocess.run(['powershell','-NoProfile','-Command',script],env={**db.control,'TLS_TEST_EVENT':eid,'TLS_TEST_FIRST':str(first),'TLS_TEST_LAST':str(last)},capture_output=True,text=True)
  if result.returncode:raise RuntimeError('Disposable event rollover failed; credentials withheld.')
-with socket.socket() as probe:assert probe.connect_ex(('127.0.0.1',5191))!=0
+with socket.socket() as probe:probe.settimeout(.5);assert probe.connect_ex(('127.0.0.1',5191))!=0
 db=TestDatabase()
 try:
  with tempfile.TemporaryDirectory(prefix='tls-dashboard-events-') as folder:
@@ -44,6 +44,11 @@ try:
     def import_event(name,first,last):
      package=test_inputs.package();package['sourceSystemId']='dashboard-'+name
      package['events'][0].update(name=name,startDate=str(first),endDate=str(last))
+     # These two programs play simultaneously during the calendar rollover check.
+     doubles={p['id']:'D'+p['id'] for p in package['participants']}
+     package['participants'] += [{**p,'id':doubles[p['id']],'name':'Doubles '+p['name'],'email':'d'+p['email']} for p in package['participants']]
+     for entry in package['entries']:
+      if entry['programId']=='PR002':entry['participantIds']=[doubles[i] for i in entry['participantIds']]
      for i in [3,4]:package['entries'].append({'id':'EX'+str(i),'eventId':'EV001','programId':'PR001','participantIds':['P00'+str(i)],'status':'A'})
      preview=call('setup/preview?kind=trs&revision='+str(dash()['revision']),package)
      saved=call('setup/confirm',{'revision':preview['revision'],'token':preview['token']})['data']

@@ -42,9 +42,10 @@ test('failed submission preserves pending operation and does not offer the submi
  expect(screen.queryByRole('button',{name:'Enter New Access Code'})).toBeNull();expect(window.location.pathname).toBe('/umpire/public-session');
 });
 test('console aligns prior scores with each player and confirms through the shared scoresheet',async()=>{
- localStorage.setItem('tls-dashboard-event','e');finish();view.match.status='RC';
+ finish();view.match.status='RC';
  const data={revision:4,selectedEventId:'e',serverTime:new Date().toISOString(),serverLocalTime:'2026-10-30T14:00:00',timeZone:'Asia/Singapore',events:[{id:'e',name:'Event',startDate:'2026-10-30',endDate:'2026-10-31',courts:[1]}],eventContext:{calendar:'O',sessionState:'I'},courts:[{number:1,status:'F',outsideEvent:false,match:view.match,next:null,lastMatch:null,device:{state:'C',name:'Tablet',ipAddress:'192.168.1.2',lastSeen:new Date().toISOString()}}],queue:[],programs:[],presets:[],officials:[],tabletUrls:[]};
  service.liveApi.mockImplementation(async()=>structuredClone(data));render(<LiveDashboard onFixtures={()=>{}} onChanged={async()=>{}}/>);
+ fireEvent.change(await screen.findByLabelText('Dashboard event'),{target:{value:'e'}});
  const scores=await screen.findByRole('table',{name:'Court match scores'});expect(within(scores).getByLabelText('Side A previous games').textContent).toBe('G13');expect(within(scores).getByLabelText('Side B previous games').textContent).toBe('G121');
  expect((screen.getByText('Device details').parentElement as HTMLDetailsElement).open).toBe(false);
  fireEvent.click(screen.getByRole('button',{name:'Confirm Result & Free Court'}));const dialog=screen.getByRole('dialog',{name:'Confirm Match Result'});
