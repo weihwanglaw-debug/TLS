@@ -6,9 +6,13 @@ public static class SessionCourts
     public static bool Available(SetupData s,EventPlan plan,int court,DateTime now)=>EventOperations.Sessions(s,plan).Any(w=>w.Date.ToDateTime(w.Start)<=now&&now<w.Date.ToDateTime(w.End)&&Allows(w,court));
     public static bool ExceptionApplies(TournamentMatch m,DateTime now)=>m.CourtExceptionCourt==m.Court&&m.CourtExceptionUntil>now&&!string.IsNullOrWhiteSpace(m.CourtExceptionReason);
     public const string UnavailableMessage="This court is unavailable for this match's playing session. Review session times and courts in Schedule.";
+    public const string EventEndedMessage = "Event ended. Extend the end date in Event Settings to call more matches.";
+    public static bool EventEnded(SetupData s, string eventId, DateTime localNow) =>
+        DateOnly.FromDateTime(localNow) > s.Events.Single(e => e.Id == eventId).EndDate;
+
     public static int[] EligibleCourts(SetupData s,EventPlan plan,TournamentMatch m,DateTime now)
     {
-        if(!m.Start.HasValue)return [];
+        if (!m.Start.HasValue || EventEnded(s, plan.EventId, now)) return [];
         if(m.Start.Value.Date==now.Date)return EventOperations.Courts(s,plan).Where(c=>!s.Venue.ClosedCourts.Contains(c)).ToArray();
         var sessions=EventOperations.Sessions(s,plan).ToList();
         var active=sessions.Where(w=>w.Date.ToDateTime(w.Start)<=now&&now<w.Date.ToDateTime(w.End)).ToList();

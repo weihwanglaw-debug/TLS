@@ -227,3 +227,10 @@ Automatic recovery verification: 70 focused tests passed, and the full SQL-backe
 ## Breaks, pauses and retirement
 
 The main action shows a disabled countdown during intervals. At zero, tap Resume or Start Next Game. Undo Point and shuttle counting remain available during scheduled breaks. Start Game counts the first shuttle when tracking is enabled. Match Actions offers Technical pause, Medical pause and Retirement. Resume returns to the interrupted game or interval. Retirement keeps the recorded score and sends the opposing side as winner for organiser confirmation.
+
+### After submission
+
+Once TLS acknowledges a submitted result, the tablet returns to the access-code
+screen. The organiser still confirms the result and releases its court. The
+same tablet can join a new assignment while the earlier result awaits organiser
+confirmation. An unacknowledged submission remains on the match for retry.

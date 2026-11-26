@@ -54,7 +54,12 @@ public sealed class LiveRuntime(SetupStore store,IDbContextFactory<TLSDbContext>
             var binding=s.Venue.Bindings.SingleOrDefault(b=>b.CodeHash==LiveAccess.Hash(request.Code.ToUpperInvariant())&&b.CodeExpires>now);
             if(binding is null)throw new RuleException("Access code is invalid, expired or already used. Ask the organiser for a new code.",401);
             var m=Find(s,binding.MatchId);TournamentRules.Need(m.Status is MatchStatus.Scheduled or MatchStatus.Playing or MatchStatus.Review,"The match is no longer available.");
-            TournamentRules.Need(!s.Venue.Bindings.Any(b=>b.Id!=binding.Id&&b.DeviceId==request.DeviceId&&b.TokenExpires>now&&b.TokenHash.Length>0),"This tablet is already assigned to another match. Release its previous assignment first.");
+            var previous = s.Venue.Bindings.Where(b => b.Id != binding.Id && b.DeviceId == request.DeviceId &&
+                b.TokenExpires > now && b.TokenHash.Length > 0).ToArray();
+            TournamentRules.Need(previous.All(b => Find(s, b.MatchId).Status == MatchStatus.Review),
+                "This tablet is already assigned to another match. Release its previous assignment first.");
+            foreach (var submitted in previous)
+                submitted.TokenHash = "";
             binding.CodeHash="";binding.TokenHash=LiveAccess.Hash(token);binding.TokenExpires=now.AddHours(24);binding.DeviceId=request.DeviceId;binding.DeviceName=request.DeviceName.Trim();binding.IpAddress=peer;id=binding.Id;
             m.Live??=new();m.Live.DeviceName=binding.DeviceName;m.Live.DeviceIp=peer;
             return new{matchId=m.Id,sessionId=id,deviceName=binding.DeviceName,ipAddress=peer};
@@ -73,6 +78,8 @@ public sealed class LiveRuntime(SetupStore store,IDbContextFactory<TLSDbContext>
             TournamentRules.Need(request.Court>=1&&request.Court<=s.CourtCount&&!s.Venue.ClosedCourts.Contains(request.Court),"Choose an open venue court.");
             TournamentRules.Need(!MatchStatus.Occupied(m.Status)||request.Court==m.Court,"An in-progress match cannot be moved to another court.");
             var p=s.Programs.Single(p=>p.Id==m.ProgramId);var plan=TournamentRules.Event(s,p.EventId);
+            if (m.Status == MatchStatus.Scheduled)
+                TournamentRules.Need(!SessionCourts.EventEnded(s, p.EventId, LocalNow(s)), SessionCourts.EventEndedMessage);
             TournamentRules.Need(p.Status=="A"&&p.Sport.Equals("Badminton",StringComparison.OrdinalIgnoreCase)&&p.EntryType is "S" or "D","Only active badminton singles/doubles can use the tablet.");
             
             TournamentRules.Need(plan.Officials.Any(o=>o.Id==request.UmpireId),"Choose an official from this event.");
@@ -113,6 +120,11 @@ public sealed class LiveRuntime(SetupStore store,IDbContextFactory<TLSDbContext>
         {
             var m=Find(s,request.MatchId);
             TournamentRules.Need((m.Status is MatchStatus.Scheduled or MatchStatus.Playing or MatchStatus.Review)&&m.Live?.PaperMode!=true,"This match cannot receive a tablet invitation.");
+            if (m.Status == MatchStatus.Scheduled)
+            {
+                var eventId = s.Programs.Single(p => p.Id == m.ProgramId).EventId;
+                TournamentRules.Need(!SessionCourts.EventEnded(s, eventId, LocalNow(s)), SessionCourts.EventEndedMessage);
+            }
             if((m.Live?.Version??0)!=request.Version)throw new RuleException("The match changed. Refresh before generating a code.",409);
             var binding=s.Venue.Bindings.SingleOrDefault(b=>b.MatchId==m.Id);
             TournamentRules.Need(binding is not null&&binding.Court==m.Court&&!s.Venue.ClosedCourts.Contains(binding.Court),"Call the match before generating a tablet invitation.");

@@ -106,7 +106,10 @@ export default function UmpireApp(){
   const fresh=await liveApi<TabletView>('tablet/command',pending,current.token,8000);
   if(fresh?.match?.id!==current.view.match.id||!fresh.match.rules||!Number.isFinite(fresh.match.version)||fresh.sessionId&&fresh.sessionId!==current.view.sessionId)throw new LiveError('TLS has not returned a matching confirmation.');
   remember({token:current.token,view:{...fresh,sessionId:fresh.sessionId||current.view.sessionId}});setOnline(!fresh.match.paperMode);connectionError.current=false;retryAt.current=0;
-  if(current.pending){setPanel(null);}return true;}
+  if (pending.action === 'SUBMIT' && fresh.match.status === 'RC') {
+   navigateSession('',true);setCode('');
+  } else if(current.pending){setPanel(null);}
+  return true;}
   catch(e){
    setOnline(false);
    if(e instanceof LiveError&&e.status>=400&&e.status<500&&![408,429].includes(e.status)){

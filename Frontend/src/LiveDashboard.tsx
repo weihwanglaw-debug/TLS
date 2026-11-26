@@ -70,7 +70,7 @@ export default function LiveDashboard({onFixtures,onChanged,onEventSettings,onPr
  const availableEvents=data.events.filter(e=>e.startDate<=today&&today<=e.endDate);
  const selectedEvent=data.events.find(e=>e.id===eventId);
  const nextSession=context?.nextSession?.replace('T',' ').slice(0,16);
- const stateMessage=!context?'':ended?(context.completed?'Event dates ended — all programs completed. View the final results.':'Event dates ended — unfinished matches or preparation remain. Review and reconcile results; new match starts are blocked.'):
+ const stateMessage=!context?'':ended?(context.completed?'Event dates ended — all programs completed. View the final results.':'Event ended. Extend the end date in Event Settings to call more matches.'):
   context.calendar==='U'?'Upcoming event — prepare fixtures, officials and tablet assignments before play. New matches can start only on their scheduled playing date within the event dates.':
   context.missingSessions?'Playing sessions are not configured. Review session planning; matches scheduled for today may still start on eligible open courts.':
   context.sessionState==='I'?`Day ${context.day} — playing session in progress. Matches already playing may finish after the session ends.`:

@@ -29,17 +29,18 @@ test('umpire reviews shared scoresheet, submits, then returns to access code wit
  expect(screen.getByRole('article',{name:'Badminton paper scoresheet'})).toBeTruthy();fireEvent.click(screen.getByRole('button',{name:'Back to scoreboard'}));
  expect(service.liveApi.mock.calls.filter(c=>c[0]==='tablet/command')).toHaveLength(0);
  fireEvent.click(review);fireEvent.click(screen.getByRole('button',{name:'Confirm & Submit Result'}));
- await screen.findByText('Result submitted');expect(screen.getByText('Waiting for acknowledgement')).toBeTruthy();expect(screen.queryByLabelText('Side A court')).toBeNull();expect(screen.queryByRole('button',{name:'Match actions'})).toBeNull();expect(screen.queryByRole('button',{name:'Scoresheet'})).toBeNull();fireEvent.click(screen.getByRole('button',{name:'Enter New Access Code'}));
+ await screen.findByRole('heading',{name:'Join Assigned Match'});
+ expect(screen.queryByLabelText('Side A court')).toBeNull();expect(screen.queryByRole('button',{name:'Match actions'})).toBeNull();expect(screen.queryByRole('button',{name:'Scoresheet'})).toBeNull();
  expect(window.location.pathname).toBe('/umpire');expect(screen.getByRole('button',{name:'Connect Tablet'})).toBeTruthy();
  expect(service.liveApi.mock.calls.filter(c=>c[0]==='tablet/command')).toHaveLength(1);expect(service.liveApi.mock.calls.some(c=>c[0]==='dashboard/confirm')).toBe(false);
  expect(JSON.parse(localStorage.getItem('tls-umpire-match')!).view.match.status).toBe('RC');
 });
-test('failed submission preserves pending operation and does not offer the submitted return button',async()=>{
+test('failed submission stays on the match and preserves the pending operation',async()=>{
  finish();service.liveApi.mockImplementation(async(path:string)=>{if(path==='tablet/command')throw new Error('Offline');return path==='tablet/state'?view:{};});showUmpire();
  const review=screen.getByRole('button',{name:'Review & submit result'});await waitFor(()=>expect((review as HTMLButtonElement).disabled).toBe(false));fireEvent.click(review);fireEvent.click(screen.getByRole('button',{name:'Confirm & Submit Result'}));
  await screen.findByText('Reconnecting…');expect(JSON.parse(localStorage.getItem('tls-umpire-match')!).pending.action).toBe('SUBMIT');
  expect(screen.queryByRole('dialog',{name:'Unable to complete action'})).toBeNull();expect(screen.queryByRole('button',{name:'Retry pending action'})).toBeNull();
- expect(screen.queryByRole('button',{name:'Enter New Access Code'})).toBeNull();expect(window.location.pathname).toBe('/umpire/public-session');
+ expect(screen.queryByRole('heading',{name:'Join Assigned Match'})).toBeNull();expect(window.location.pathname).toBe('/umpire/public-session');
 });
 test('console aligns prior scores with each player and confirms through the shared scoresheet',async()=>{
  finish();view.match.status='RC';

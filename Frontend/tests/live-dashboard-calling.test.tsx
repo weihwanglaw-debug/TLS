@@ -154,7 +154,9 @@ test('venue-day boundaries and a remembered ID still require an explicit choice'
  expect(screen.queryByText(/Match Queue/)).toBeNull();
  fireEvent.change(picker,{target:{value:'e'}});await screen.findByText(/Match Queue/);
  data.serverLocalTime='2026-10-29T00:00:01';data.eventContext!.calendar='C';
- await screen.findByText(/Event dates ended — unfinished matches/,{}, {timeout:5000});
+ await screen.findByText('Event ended. Extend the end date in Event Settings to call more matches.',{}, {timeout:5000});
+ expect(screen.queryByRole('button',{name:/Call Next Match/})).toBeNull();
+ expect(screen.getAllByRole<HTMLButtonElement>('button',{name:'Assign to Court'}).every(button=>button.disabled)).toBe(true);
  expect(screen.getByText('Test Event')).toBeTruthy();
  fireEvent.click(screen.getByRole('button',{name:'Change event'}));
  await screen.findByText('No event is scheduled for today.');

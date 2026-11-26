@@ -77,7 +77,7 @@ try:
       mutate('tournament/event',{'plan':{**plan,'dailySessions':windows}})
       check(dash(eid)['eventContext']['sessionState']==expected)
     mutate('tournament/event',{'plan':plan});plan['officials']=call('tournament/'+eid)['eventPlan']['officials']
-    rules={'name':'Short tests','gamesToWin':1,'pointsToWin':5,'winBy':1,'pointCap':5,'intervalAt':3,'decidingEndsAt':3,'cardsEnabled':True,'challengesEnabled':False,'countShuttles':True}
+    rules={'name':'Short tests','gamesToWin':1,'pointsToWin':5,'winBy':1,'pointCap':5,'intervalAt':3,'intervalSeconds':0,'decidingEndsAt':3,'cardsEnabled':True,'challengesEnabled':False,'countShuttles':True}
     preset=mutate('presets/',{'preset':{'id':'','name':'Dashboard tests','rules':rules,'status':'A','isDefault':True}})['presets'][0]['id']
     def generate(event,program):
      existing=next(p for p in call('tournament/'+event)['plans'] if p['programId']==program)
@@ -121,16 +121,35 @@ try:
     rollover(eid,today-timedelta(days=2),today-timedelta(days=1))
     check(dash(eid)['eventContext']['calendar']=='C' and dash(eid)['eventContext']['unfinished']>0)
     check(all(not q['eligibleCourts'] for q in dash(eid)['queue']))
-    mutate('dashboard/pair',{'matchId':waiting['id'],'court':2,'umpireId':plan['officials'][1]['id'],'presetId':preset,'reason':''},'POST',400)
+    ended_message='Extend the end date in Event Settings'
+    rejected=mutate('dashboard/pair',{'matchId':waiting['id'],'court':2,'umpireId':plan['officials'][1]['id'],'presetId':preset,'reason':''},'POST',400)
+    check(ended_message in rejected['message'])
+    renewal=mutate('dashboard/pairing',{'matchId':waiting['id'],'version':expiredGrant['match']['match']['version']},'POST',400)
+    check(ended_message in renewal['message'])
     replacement=mutate('dashboard/pair',{'matchId':m['id'],'court':1,'umpireId':plan['officials'][0]['id'],'presetId':preset,'reason':'Replace tablet after session expiry'},'POST')
     check(replacement['match']['status']=='IP')
     expiredMatch=expiredGrant['match']['match'];server=next(p['id'] for p in expiredMatch['players'] if p['side']=='A');receiver=next(p['id'] for p in expiredMatch['players'] if p['side']=='B')
     blocked=call('tablet/command',{'version':expiredMatch['version'],'operationId':str(uuid.uuid4()),'action':'START','serving':{'serverSide':'A','serverId':server,'receiverId':receiver,'leftSide':'A'}},status=400,token=expiredGrant['token'])
     check('event dates' in blocked['message'])
     current=call('tablet/state',token=grant['token'])
-    for _ in range(5):current=call('tablet/command',{'version':current['match']['version'],'operationId':str(uuid.uuid4()),'action':'POINT','side':'A'},token=grant['token'])
+    for _ in range(5):
+     if current['match']['gamePhase']=='IN':
+      current=call('tablet/command',{'version':current['match']['version'],'operationId':str(uuid.uuid4()),'action':'RESUME_INTERVAL'},token=grant['token'])
+     current=call('tablet/command',{'version':current['match']['version'],'operationId':str(uuid.uuid4()),'action':'POINT','side':'A'},token=grant['token'])
     current=call('tablet/command',{'version':current['match']['version'],'operationId':str(uuid.uuid4()),'action':'SUBMIT'},token=grant['token'])
     check(dash(eid)['eventContext']['awaitingConfirmation']==1)
+    # Extend the event through Settings, then reuse the tablet without waiting for confirmation.
+    rollover(other,today+timedelta(days=7),today+timedelta(days=8))
+    rollover(past,today+timedelta(days=5),today+timedelta(days=6))
+    mutate('tournament/event-dates',{'eventId':eid,'startDate':str(today-timedelta(days=2)),'endDate':str(today)})
+    check(dash(eid)['eventContext']['calendar']=='O')
+    next_code=mutate('dashboard/pair',{'matchId':waiting['id'],'court':2,'umpireId':plan['officials'][1]['id'],'presetId':preset,'reason':''},'POST')
+    next_grant=call('tablet/pair',{'code':next_code['code'],'deviceId':'dashboard-event-test-device','deviceName':'Dashboard event test'})
+    check(next_grant['match']['match']['id']==waiting['id'])
+    call('tablet/state',status=401,token=grant['token'])
+    check(dash(eid)['eventContext']['awaitingConfirmation']==1)
+    # A fresh expiry still permits result confirmation for a match that finished.
+    rollover(eid,today-timedelta(days=2),today-timedelta(days=1))
     mutate('dashboard/confirm',{'matchId':current['match']['id'],'version':current['match']['version'],'reason':''},'POST')
     check(not any(c['match'] and c['match']['id']==current['match']['id'] for c in dash(eid)['courts']))
     for pp in call('tournament/'+eid)['plans']:

@@ -384,3 +384,11 @@ Every two-second poll replaces the card list. A corrected result is reflected, a
 ## Game phase
 
 Cards and tables show the tablet's warm-up, game, interval or pause state beside the score. A technical or medical pause retains the court assignment. A retirement submitted by the umpire remains on court until the organiser confirms.
+
+### Event date expiry
+
+After the end date in the venue time zone, the dashboard stops new match calls
+and code renewals for matches that have not started. Extend the end date in
+Event Settings to restore them. Matches already in progress can finish, and
+submitted results remain available for confirmation. The server checks the
+event date again if a tablet tries to start using an earlier code.
